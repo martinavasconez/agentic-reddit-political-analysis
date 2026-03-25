@@ -1,0 +1,155 @@
+<mxfile host="app.diagrams.net" agent="Claude" version="21.0.0" type="device">
+  <diagram name="Decisión Sentimiento" id="decision-sentiment-01">
+    <mxGraphModel dx="1000" dy="750" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="650" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="Árbol de Decisión — Agente de Sentimiento" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="100" y="15" width="700" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- RoBERTa input -->
+        <mxCell id="roberta" value="RoBERTa&#xa;cardiffnlp/twitter-roberta-base-sentiment-latest&#xa;top_k=None → scores para 3 clases" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="275" y="60" width="350" height="65" as="geometry" />
+        </mxCell>
+
+        <!-- Decision diamond -->
+        <mxCell id="dec" value="confianza de la&#xa;clase ganadora" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="325" y="160" width="250" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Branch labels on diamond -->
+
+        <!-- LEFT: accepted -->
+        <mxCell id="branch_left" value="&gt; 0.85" style="text;html=1;fontSize=11;fontStyle=1;fillColor=none;strokeColor=none;align=center;" vertex="1" parent="1">
+          <mxGeometry x="130" y="185" width="80" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- CENTER: cross_validated -->
+        <mxCell id="branch_center" value="0.50 – 0.85" style="text;html=1;fontSize=11;fontStyle=1;fillColor=none;strokeColor=none;align=center;" vertex="1" parent="1">
+          <mxGeometry x="370" y="250" width="160" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- RIGHT: ambiguous -->
+        <mxCell id="branch_right" value="≤ 0.50" style="text;html=1;fontSize=11;fontStyle=1;fillColor=none;strokeColor=none;align=center;" vertex="1" parent="1">
+          <mxGeometry x="700" y="185" width="80" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- ACCEPTED box -->
+        <mxCell id="accepted" value="accepted&#xa;──────&#xa;RoBERTa directo&#xa;sin validación adicional" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="160" width="200" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- CROSS_VALIDATED box -->
+        <mxCell id="cv_box" value="cross_validated&#xa;──────&#xa;Consultar VADER" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="325" y="295" width="250" height="65" as="geometry" />
+        </mxCell>
+
+        <!-- VADER agreement diamond -->
+        <mxCell id="dec_vader" value="¿RoBERTa == VADER?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6900b;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="325" y="390" width="250" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- AMBIGUOUS box -->
+        <mxCell id="ambiguous" value="ambiguous&#xa;──────&#xa;Excluido del&#xa;agregado final" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="660" y="160" width="200" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- AGREE result -->
+        <mxCell id="agree" value="✅ Acuerdo&#xa;──────&#xa;final_label = RoBERTa&#xa;confianza + 0.05" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="160" y="390" width="185" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- DISAGREE result -->
+        <mxCell id="disagree" value="⚠️ Discrepancia&#xa;──────&#xa;final_label = RoBERTa&#xa;VADER como evidencia" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6900b;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="555" y="390" width="185" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- FINAL RECORD box -->
+        <mxCell id="record" value="Registro en sentiment_results&#xa;(label · confianza · decisión · vader_compound)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="250" y="530" width="400" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- EDGES -->
+
+        <!-- roberta → dec -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="roberta" target="dec" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- dec → accepted (left) -->
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" source="dec" target="accepted" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- dec → cv_box (down) -->
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" source="dec" target="cv_box" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- dec → ambiguous (right) -->
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" source="dec" target="ambiguous" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- cv_box → dec_vader -->
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="cv_box" target="dec_vader" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- dec_vader → agree (left, SÍ) -->
+        <mxCell id="e6" value="SÍ" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" source="dec_vader" target="agree" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- dec_vader → disagree (right, NO) -->
+        <mxCell id="e7" value="NO" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" source="dec_vader" target="disagree" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- accepted → record -->
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="accepted" target="record" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="140" y="515" />
+              <mxPoint x="350" y="515" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- agree → record -->
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="agree" target="record" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="252" y="515" />
+              <mxPoint x="350" y="515" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- disagree → record -->
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="disagree" target="record" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="647" y="515" />
+              <mxPoint x="550" y="515" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ambiguous → record -->
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="ambiguous" target="record" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="760" y="515" />
+              <mxPoint x="550" y="515" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

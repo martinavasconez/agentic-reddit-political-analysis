@@ -1,0 +1,54 @@
+{
+  "n_total": 201348,
+  "n_evaluated": 191317,
+  "n_ambiguous_roberta": 10031,
+  "accuracy": 0.6827,
+  "precision_macro": 0.519,
+  "recall_macro": 0.5983,
+  "f1_macro": 0.5139,
+  "agreement_rate": 0.6487,
+  "confusion_matrix": {
+    "labels": [
+      "positive",
+      "negative",
+      "neutral"
+    ],
+    "matrix": [
+      [
+        1267,
+        587,
+        553
+      ],
+      [
+        2557,
+        99390,
+        13642
+      ],
+      [
+        3805,
+        39553,
+        29963
+      ]
+    ]
+  },
+  "per_class": {
+    "positive": {
+      "precision": 0.1661,
+      "recall": 0.5264,
+      "f1": 0.2525,
+      "support": 2407
+    },
+    "negative": {
+      "precision": 0.7123,
+      "recall": 0.8599,
+      "f1": 0.7792,
+      "support": 115589
+    },
+    "neutral": {
+      "precision": 0.6785,
+      "recall": 0.4087,
+      "f1": 0.5101,
+      "support": 73321
+    }
+  }
+}

@@ -1,0 +1,127 @@
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" version="29.6.5">
+  <diagram name="Arquitectura Agentic Mejorada" id="TRTuh9sjceJ7uYFreWwd">
+    <mxGraphModel dx="1036" dy="700" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- CAPA 1 banner -->
+        <mxCell id="banner1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6E6E6;fontStyle=1;" value="CAPA 1: Ingesta y Persistencia (Determinista)" vertex="1">
+          <mxGeometry height="40" width="620" x="200" y="20" as="geometry" />
+        </mxCell>
+
+        <!-- Fuente 1: Reddit API -->
+        <mxCell id="reddit-api" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" value="Reddit API (PRAW)&#xa;datos recientes" vertex="1">
+          <mxGeometry height="55" width="195" x="205" y="80" as="geometry" />
+        </mxCell>
+
+        <!-- Fuente 2: Arctic Shift -->
+        <mxCell id="arctic-api" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6900b;" value="Arctic Shift Archive&#xa;datos históricos — 89 días" vertex="1">
+          <mxGeometry height="55" width="195" x="620" y="80" as="geometry" />
+        </mxCell>
+
+        <!-- Módulo de Recolección -->
+        <mxCell id="recoleccion" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Módulo de Recolección&#xa;(collector.py + arctic_collector.py)" vertex="1">
+          <mxGeometry height="60" width="300" x="360" y="163" as="geometry" />
+        </mxCell>
+
+        <!-- Preprocessing -->
+        <mxCell id="preproc" parent="1" style="rounded=1;whiteSpace=wrap;html=1;" value="Preprocesamiento de Texto" vertex="1">
+          <mxGeometry height="60" width="300" x="360" y="250" as="geometry" />
+        </mxCell>
+
+        <!-- DB -->
+        <mxCell id="db" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6c8ebf;" value="Base de Datos (SQLite)" vertex="1">
+          <mxGeometry height="60" width="300" x="360" y="337" as="geometry" />
+        </mxCell>
+
+        <!-- CAPA 2 banner -->
+        <mxCell id="banner2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;fontStyle=1;" value="CAPA 2: Orquestación Agentic" vertex="1">
+          <mxGeometry height="40" width="620" x="200" y="420" as="geometry" />
+        </mxCell>
+
+        <!-- Orchestrator -->
+        <mxCell id="orchestrator" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B4C6E7;" value="Orquestador Agentic (LangGraph)&#xa;- Estado global&#xa;- Decisiones condicionales" vertex="1">
+          <mxGeometry height="100" width="360" x="330" y="480" as="geometry" />
+        </mxCell>
+
+        <!-- Agents -->
+        <mxCell id="agent-sentiment" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82b366;" value="Agente de Sentimiento&#xa;(RoBERTa + VADER)" vertex="1">
+          <mxGeometry height="80" width="220" x="100" y="640" as="geometry" />
+        </mxCell>
+        <mxCell id="agent-trends" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82b366;" value="Agente de Tendencias&#xa;(BERTopic + Δ)" vertex="1">
+          <mxGeometry height="80" width="220" x="400" y="640" as="geometry" />
+        </mxCell>
+        <mxCell id="agent-report" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82b366;" value="Agente de Validación&#xa;y Reporte (LLM)" vertex="1">
+          <mxGeometry height="80" width="220" x="700" y="640" as="geometry" />
+        </mxCell>
+
+        <!-- Arrows CAPA 1 -->
+        <!-- Reddit API → Módulo -->
+        <mxCell id="e1" edge="1" parent="1" style="endArrow=block;endFill=1;html=1;strokeColor=#6c8ebf;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="302" y="136" as="sourcePoint" />
+            <mxPoint x="430" y="162" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Arctic Shift → Módulo -->
+        <mxCell id="e2" edge="1" parent="1" style="endArrow=block;endFill=1;html=1;strokeColor=#d6900b;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="718" y="136" as="sourcePoint" />
+            <mxPoint x="590" y="162" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Módulo → Preproc -->
+        <mxCell id="e3" edge="1" parent="1" style="endArrow=block;endFill=1;html=1;strokeColor=#333333;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="510" y="224" as="sourcePoint" />
+            <mxPoint x="510" y="249" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Preproc → DB -->
+        <mxCell id="e4" edge="1" parent="1" style="endArrow=block;endFill=1;html=1;strokeColor=#333333;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="510" y="311" as="sourcePoint" />
+            <mxPoint x="510" y="336" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- DB → Orchestrator -->
+        <mxCell id="e5" edge="1" parent="1" style="endArrow=block;endFill=1;html=1;strokeColor=#333333;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="510" y="398" as="sourcePoint" />
+            <mxPoint x="510" y="479" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Orchestrator → Agente Sentimiento -->
+        <mxCell id="e6" edge="1" parent="1" style="endArrow=block;endFill=1;html=1;strokeColor=#000000;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="388" y="581" as="sourcePoint" />
+            <mxPoint x="210" y="639" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Orchestrator → Agente Tendencias -->
+        <mxCell id="e7" edge="1" parent="1" style="endArrow=block;endFill=1;html=1;strokeColor=#000000;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="510" y="581" as="sourcePoint" />
+            <mxPoint x="510" y="639" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Orchestrator → Agente Validación -->
+        <mxCell id="e8" edge="1" parent="1" style="endArrow=block;endFill=1;html=1;strokeColor=#000000;">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="650" y="581" as="sourcePoint" />
+            <mxPoint x="810" y="639" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,212 @@
+<mxfile host="app.diagrams.net" agent="Claude" version="21.0.0" type="device">
+  <diagram name="Recolección" id="recoleccion-01">
+    <mxGraphModel dx="1200" dy="800" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="920" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Main title -->
+        <mxCell id="title" value="Módulo de Recolección — Flujo Interno" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="10" width="1100" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== LEFT: PRAW ===================== -->
+        <mxCell id="title_left" value="Reddit API (PRAW) — datos recientes (7 días)" style="text;html=1;strokeColor=#6c8ebf;fillColor=#dae8fc;align=center;verticalAlign=middle;fontSize=12;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="75" y="50" width="490" height="35" as="geometry" />
+        </mxCell>
+
+        <mxCell id="start_praw" value="Reddit API / PRAW" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="195" y="100" width="250" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="oauth" value="create_reddit_client()&#xa;OAuth 2.0 — read-only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="170" y="155" width="300" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="init_run" value="start_collection_run()&#xa;registra parámetros en BD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="170" y="220" width="300" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="db_runs" value="collection_runs" style="shape=mxgraph.flowchart.database;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="540" y="227" width="150" height="36" as="geometry" />
+        </mxCell>
+
+        <!-- PRAW Loop -->
+        <mxCell id="loop_bg_praw" value="LOOP: sort_method ∈ { new, hot, top }" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 4;fillColor=#fffde7;strokeColor=#f9a825;fontSize=11;fontStyle=1;verticalAlign=top;align=left;spacingLeft=6;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="100" y="285" width="490" height="340" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fetch_praw" value="Fetch posts — /r/politics/{sort_method}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="150" y="320" width="390" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dec_praw" value="¿Fecha válida? ¿No duplicado?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="130" y="385" width="430" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="skip_praw" value="skip / break" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="10" y="397" width="80" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="extract_praw" value="_extract_post_data() + db.insert_post()&#xa;INSERT OR IGNORE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="150" y="460" width="390" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="comments_praw" value="_collect_comments() — replace_more(limit=0)&#xa;+ insert_batch()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="150" y="525" width="390" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sleep_praw" value="time.sleep(1s) — rate limit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="150" y="590" width="390" height="35" as="geometry" />
+        </mxCell>
+
+        <mxCell id="finish_run" value="finish_collection_run()&#xa;status = 'completed'" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="170" y="650" width="300" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== RIGHT: ARCTIC SHIFT ===================== -->
+        <mxCell id="title_right" value="Arctic Shift Archive — datos históricos (82 días)" style="text;html=1;strokeColor=#d6900b;fillColor=#ffe6cc;align=center;verticalAlign=middle;fontSize=12;fontStyle=1;rounded=1;" vertex="1" parent="1">
+          <mxGeometry x="935" y="50" width="490" height="35" as="geometry" />
+        </mxCell>
+
+        <mxCell id="start_arctic" value="Arctic Shift Archive" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d6900b;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1055" y="100" width="250" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arctic_init" value="ArcticCollector.__init__()&#xa;subreddit=r/politics, date_range" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="155" width="300" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arctic_range" value="Calcular rango: últimos 82 días&#xa;start_date → end_date" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="220" width="300" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Arctic Loop -->
+        <mxCell id="loop_bg_arctic" value="LOOP: día en rango (82 iteraciones)" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 4;fillColor=#fff3e0;strokeColor=#d6900b;fontSize=11;fontStyle=1;verticalAlign=top;align=left;spacingLeft=6;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="910" y="285" width="490" height="340" as="geometry" />
+        </mxCell>
+
+        <mxCell id="pag_req" value="request paginado: after / before (Unix timestamp)&#xa;/r/politics — un día completo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="960" y="320" width="390" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="fetch_arctic" value="fetch posts + hasta 200 comentarios / post&#xa;COMMENTS_PER_POST = 200" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="960" y="390" width="390" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="insert_arctic" value="INSERT OR IGNORE — posts + comments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="960" y="460" width="390" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sleep_arctic" value="time.sleep(0.5s) — rate limit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="960" y="525" width="390" height="35" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dec_arctic" value="¿Más páginas en este día?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="960" y="573" width="390" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="arctic_done" value="Día completo → siguiente día" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="650" width="300" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== SHARED BOTTOM ===================== -->
+        <mxCell id="db_final" value="SQLite DB (posts + comments)" style="shape=mxgraph.flowchart.database;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="600" y="738" width="300" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="stats_end" value="12,002 posts · 283,041 comentarios · 89 días" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="525" y="795" width="450" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EDGES — PRAW ===================== -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="start_praw" target="oauth" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="oauth" target="init_run" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="init_run" target="db_runs" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="540" y="245" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="init_run" target="fetch_praw" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="fetch_praw" target="dec_praw" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="NO" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" source="dec_praw" target="skip_praw" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="SÍ" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" source="dec_praw" target="extract_praw" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="extract_praw" target="comments_praw" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="comments_praw" target="sleep_praw" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="next post" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" source="sleep_praw" target="fetch_praw" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="118" y="607" /><mxPoint x="118" y="345" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="sort completo" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" source="sleep_praw" target="finish_run" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="320" y="645" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="finish_run" target="db_final" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="320" y="725" /><mxPoint x="650" y="725" /></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ===================== EDGES — ARCTIC ===================== -->
+        <mxCell id="ea1" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="start_arctic" target="arctic_init" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea2" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="arctic_init" target="arctic_range" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea3" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="arctic_range" target="pag_req" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea4" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="pag_req" target="fetch_arctic" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea5" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="fetch_arctic" target="insert_arctic" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea6" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="insert_arctic" target="sleep_arctic" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea7" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="sleep_arctic" target="dec_arctic" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea8" value="SÍ" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" source="dec_arctic" target="pag_req" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1460" y="598" /><mxPoint x="1460" y="347" /></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ea9" value="NO" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" source="dec_arctic" target="arctic_done" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ea10" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="arctic_done" target="db_final" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1180" y="725" /><mxPoint x="850" y="725" /></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- DB final → stats -->
+        <mxCell id="ef1" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" source="db_final" target="stats_end" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

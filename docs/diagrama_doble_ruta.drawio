@@ -1,0 +1,98 @@
+<mxfile host="app.diagrams.net" modified="2026-02-23T00:00:00.000Z" agent="Claude" version="21.0.0" type="device">
+  <diagram name="Doble Ruta" id="doble-ruta-01">
+    <mxGraphModel dx="1000" dy="560" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1000" pageHeight="560" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="Doble Ruta de Preprocesamiento" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="150" y="15" width="700" height="25" as="geometry" />
+        </mxCell>
+
+        <!-- Original text -->
+        <mxCell id="orig" value="texto_original (comentario o post de Reddit)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="50" width="400" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- clean_base -->
+        <mxCell id="base" value="clean_base() — Transformaciones comunes&lt;br&gt;Markdown visible · Entidades HTML · Unicode NFKC · Puntuación · Espacios" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="250" y="105" width="500" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Sentiment header -->
+        <mxCell id="sent_header" value="text_for_sentiment  →  RoBERTa" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="60" y="210" width="380" height="35" as="geometry" />
+        </mxCell>
+
+        <!-- Sentiment body -->
+        <mxCell id="sent_body" value="URLs  →  reemplazadas por &quot;http&quot;&lt;br&gt;Menciones  →  reemplazadas por &quot;@user&quot;&lt;br&gt;Mayúsculas: preservadas&lt;br&gt;Números: preservados&lt;br&gt;Emojis: eliminados&lt;br&gt;────────────────────&lt;br&gt;Filtro mínimo: ≥ 10 palabras" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0fff0;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="60" y="250" width="380" height="160" as="geometry" />
+        </mxCell>
+
+        <!-- Topics header -->
+        <mxCell id="top_header" value="text_for_topics  →  BERTopic" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="560" y="210" width="380" height="35" as="geometry" />
+        </mxCell>
+
+        <!-- Topics body -->
+        <mxCell id="top_body" value="URLs  →  eliminadas completamente&lt;br&gt;Menciones  →  eliminadas completamente&lt;br&gt;Mayúsculas: preservadas&lt;br&gt;Números: preservados&lt;br&gt;Emojis: eliminados&lt;br&gt;────────────────────&lt;br&gt;Filtro mínimo: ≥ 15 palabras" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffdf0;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="560" y="250" width="380" height="160" as="geometry" />
+        </mxCell>
+
+        <!-- Diff box -->
+        <mxCell id="diff_box" value="Diferencia clave: URLs y menciones&lt;br&gt;RoBERTa espera marcadores (&quot;http&quot;, &quot;@user&quot;)&lt;br&gt;BERTopic no necesita señales de red social" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="300" y="430" width="400" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- EDGES -->
+
+        <!-- orig → base -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;" edge="1" source="orig" target="base" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- base → sent_header (bottom-left exit) -->
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;exitX=0.3;exitY=1;entryX=0.5;entryY=0;" edge="1" source="base" target="sent_header" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="400" y="190" />
+              <mxPoint x="250" y="190" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- base → top_header (bottom-right exit) -->
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;exitX=0.7;exitY=1;entryX=0.5;entryY=0;" edge="1" source="base" target="top_header" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="600" y="190" />
+              <mxPoint x="750" y="190" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- sent_body → diff_box -->
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;exitX=0.5;exitY=1;entryX=0.3;entryY=0;" edge="1" source="sent_body" target="diff_box" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="250" y="420" />
+              <mxPoint x="420" y="420" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- top_body → diff_box -->
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;fontSize=10;exitX=0.5;exitY=1;entryX=0.7;entryY=0;" edge="1" source="top_body" target="diff_box" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="750" y="420" />
+              <mxPoint x="580" y="420" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
