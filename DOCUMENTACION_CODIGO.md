@@ -475,7 +475,7 @@ donde:
 
 ### Configuración
 ```python
-DELTA_HIGH         = 1.5    # Umbral para tendencia/spike (calibrado con corpus real de 89 días)
+DELTA_HIGH         = 1.5    # Umbral para tendencia/spike (calibrado con corpus real de 90 días)
 DELTA_MODERATE     = 1.0    # Umbral para tendencia moderada
 COVERAGE_THRESHOLD = 0.05   # 5% del corpus = emergente vs localizado
 STD_FLOOR          = 0.005  # Piso mínimo de σ
@@ -484,7 +484,7 @@ HISTORICAL_DAYS    = 60     # Días de ventana histórica
 CURRENT_DAYS       = 7      # Días de ventana de evaluación
 ```
 
-**Nota sobre thresholds**: Los valores 1.5/1.0 están calibrados para el corpus real de 89 días donde max Δ observado es ~3.85.
+**Nota sobre thresholds**: Los valores 1.5/1.0 están calibrados para el corpus real de 90 días donde max Δ observado es 1.58 (tópico `oil_oil companies`, run `db7e2622`).
 
 ### Stopwords de Reddit
 Se añade una lista `REDDIT_STOPWORDS` al `CountVectorizer` de BERTopic para filtrar meta-conversación:
@@ -557,16 +557,15 @@ Calcula **c_v** y **UMass** usando gensim sobre los tópicos del último run de 
 - Tasa de ambigüedad: 4.98% ✅ (objetivo < 10%)
 - Acuerdo inter-modelo RoBERTa-VADER: 42.9% (zona genuinamente ambigua)
 
-**Tópicos (run `db7e2622`, 236 tópicos):**
+**Tópicos (run `db7e2622`, 365 tópicos):**
 - c_v = 0.776 ✅ (objetivo > 0.55)
-- Jaccard stability (3 runs) = 0.794 ✅ (objetivo > 0.70)
-- Top tópico: `trans_women_sports` Δ=+3.85 (🔥 EMERGING TREND, cobertura 5.4%)
+- Jaccard stability (3 runs) = 0.731 ✅ (objetivo > 0.70)
+- Top tópico: `oil_oil companies` Δ=1.58 (localized_spike)
 
 > **Nota UMass**: El score bajo es esperado en corpora de redes sociales. UMass fue calibrado sobre textos formales (Wikipedia, noticias); en Reddit el léxico es más diverso y los términos no co-ocurren tan densamente. c_v (que usa co-ocurrencia en ventana deslizante) es más robusto para este tipo de datos y el valor 0.77 es excelente.
 
 **Estabilidad (Jaccard 3 runs, 5000 textos):**
-- Run 1 vs 2: 0.7940 / Run 1 vs 3: 0.7828 / Run 2 vs 3: 0.8037
-- **Jaccard promedio: 0.7935 ✅** (objetivo > 0.70)
+- **Jaccard promedio: 0.731 ✅** (objetivo > 0.70)
 
 ### `--stability` — Estabilidad de clustering
 
@@ -797,5 +796,5 @@ pointed this out. This is going to hurt us badly
 | `STD_FLOOR` | trends_agent.py | 0.005 | Piso mínimo de σ para estabilidad numérica |
 | `HISTORICAL_DAYS` | trends_agent.py | 60 | Días de ventana histórica para baseline |
 | `CURRENT_DAYS` | trends_agent.py | 7 | Días de ventana actual para Δ |
-| `min_topic_size` | trends_agent.py | 50 | Tamaño mínimo de tópico BERTopic (~236 tópicos con corpus de 89 días) |
+| `min_topic_size` | trends_agent.py | 50 | Tamaño mínimo de tópico BERTopic (~365 tópicos con corpus de 90 días) |
 | `MIN_TOPIC_TEXTS` | trends_agent.py | 10 | Mínimo textos en ventana actual para evaluar tópico |
