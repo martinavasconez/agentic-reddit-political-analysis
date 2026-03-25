@@ -4,6 +4,8 @@ Script de evaluación del protocolo experimental.
 Métricas implementadas:
   --sentiment   Distribución de confianza, tasa de ambigüedad,
                 acuerdo inter-modelo RoBERTa vs VADER
+  --groundtruth Accuracy, Precision, Recall y F1 macro contra
+                pseudo-etiquetas DeepSeek V3 (ground_truth_labels)
   --topics      Coherencia temática c_v y UMass, comparación de
                 configuraciones de n_topics
   --stability   Estabilidad de clustering BERTopic (Jaccard similarity
@@ -14,6 +16,7 @@ Métricas implementadas:
 Uso:
     python -m scripts.run_evaluation --all
     python -m scripts.run_evaluation --sentiment
+    python -m scripts.run_evaluation --groundtruth
     python -m scripts.run_evaluation --topics
     python -m scripts.run_evaluation --stability
     python -m scripts.run_evaluation --latency
@@ -146,7 +149,70 @@ def eval_sentiment(db: DatabaseManager):
 
 
 # ------------------------------------------------------------------ #
-#  2. Coherencia temática + comparación de configuraciones            #
+#  2. Métricas contra ground truth DeepSeek V3                       #
+# ------------------------------------------------------------------ #
+
+def eval_groundtruth(db: DatabaseManager):
+    logger.info("=" * 60)
+    logger.info("EVALUACIÓN CONTRA GROUND TRUTH (DeepSeek V3)")
+    logger.info("=" * 60)
+
+    try:
+        from sklearn.metrics import (
+            accuracy_score, classification_report, confusion_matrix
+        )
+    except ImportError:
+        logger.error("scikit-learn no instalado. Ejecuta: pip install scikit-learn")
+        return
+
+    conn = sqlite3.connect(db.db_path)
+    conn.row_factory = sqlite3.Row
+
+    rows = conn.execute("""
+        SELECT sr.final_label as pred, gt.llm_label as true_label
+        FROM sentiment_results sr
+        JOIN ground_truth_labels gt
+            ON sr.source_id = gt.source_id AND sr.source_type = gt.source_type
+        WHERE sr.final_label != 'ambiguous'
+    """).fetchall()
+    conn.close()
+
+    if not rows:
+        logger.warning("Sin datos para calcular métricas contra ground truth.")
+        return
+
+    y_pred = [r["pred"] for r in rows]
+    y_true = [r["true_label"] for r in rows]
+    labels = ["negative", "neutral", "positive"]
+
+    total = len(y_true)
+    ambiguous_count = conn.execute if False else None
+
+    logger.info(f"\n  Textos evaluados (excl. ambiguous): {total:,}")
+
+    acc = accuracy_score(y_true, y_pred)
+    logger.info(f"  Accuracy : {acc:.4f}")
+
+    logger.info("\n  Reporte por clase:")
+    report = classification_report(y_true, y_pred, labels=labels, digits=3)
+    for line in report.splitlines():
+        logger.info(f"  {line}")
+
+    logger.info("\n  Matriz de confusión (filas=true, columnas=pred):")
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    header = f"  {'':>12}" + "".join(f"  pred_{l[:3]:>3}" for l in labels)
+    logger.info(header)
+    for i, label in enumerate(labels):
+        row_str = "  ".join(f"{cm[i][j]:>9,}" for j in range(len(labels)))
+        logger.info(f"  true_{label[:3]:>3}      {row_str}")
+
+    agree = sum(1 for p, t in zip(y_pred, y_true) if p == t)
+    logger.info(f"\n  Agreement rate: {agree:,}/{total:,} = {agree/total*100:.2f}%")
+    logger.info("=" * 60)
+
+
+# ------------------------------------------------------------------ #
+#  3. Coherencia temática + comparación de configuraciones            #
 # ------------------------------------------------------------------ #
 
 def eval_topics(db: DatabaseManager, run_id: str = None):
@@ -429,6 +495,7 @@ def eval_latency(db: DatabaseManager, sample_size: int = 200):
 def main():
     parser = argparse.ArgumentParser(description="Evaluación del protocolo experimental")
     parser.add_argument("--sentiment", action="store_true", help="Métricas de sentimiento")
+    parser.add_argument("--groundtruth", action="store_true", help="Accuracy/F1 contra pseudo ground truth DeepSeek V3")
     parser.add_argument("--topics", action="store_true", help="Coherencia temática c_v y UMass")
     parser.add_argument("--stability", action="store_true", help="Estabilidad de clustering (3 runs BERTopic)")
     parser.add_argument("--latency", action="store_true", help="Latencia comparativa con/sin agente")
@@ -439,7 +506,7 @@ def main():
                         help="Textos para test de latencia (default: 200)")
     args = parser.parse_args()
 
-    if not any([args.sentiment, args.topics, args.stability, args.latency, args.all]):
+    if not any([args.sentiment, args.groundtruth, args.topics, args.stability, args.latency, args.all]):
         parser.print_help()
         return
 
@@ -447,6 +514,9 @@ def main():
 
     if args.all or args.sentiment:
         eval_sentiment(db)
+
+    if args.all or args.groundtruth:
+        eval_groundtruth(db)
 
     if args.all or args.topics:
         eval_topics(db)
