@@ -25,7 +25,7 @@ Este proyecto implementa una **arquitectura agentic** para el análisis de senti
 
 | Componente | Descripción | Estado |
 |-----------|-------------|--------|
-| Recolección histórica | Arctic Shift API — 82 días de datos históricos uniformes | ✅ |
+| Recolección histórica | Arctic Shift API — 90 días de datos históricos uniformes | ✅ |
 | Recolección en tiempo real | PRAW — posts más recientes | ✅ |
 | Preprocesamiento | Limpieza y normalización para RoBERTa y BERTopic | ✅ |
 | Agente de Sentimiento | RoBERTa + VADER con patrón ReAct | ✅ |
@@ -109,7 +109,7 @@ Centraliza toda la configuración. Carga credenciales de Reddit desde `.env`.
 | Parámetro | Valor | Descripción |
 |-----------|-------|-------------|
 | `TARGET_SUBREDDITS` | `["politics"]` | Subreddits objetivo |
-| `DEFAULT_COLLECTION_DAYS` | 7 | Ventana de recolección PRAW (~7 días disponibles vía API oficial) |
+| `DEFAULT_COLLECTION_DAYS` | 7 | Ventana de recolección PRAW |
 | `POSTS_PER_SUBREDDIT` | 500 | Máximo de posts por subreddit (PRAW) |
 | `COMMENTS_PER_POST` | 100 | Máximo de comentarios por post (PRAW) |
 | `RATE_LIMIT_SLEEP` | 1 | Segundos entre requests al API |
@@ -471,12 +471,6 @@ donde:
 
 **STD_FLOOR**: Valor mínimo para la desviación estándar. Evita que tópicos muy estables históricamente (σ ≈ 0) generen Δ artificialmente alto por división por valores cercanos a cero.
 
-### Ventanas temporales
-- **Histórica** (`HISTORICAL_DAYS=60`): baseline para calcular media y σ de pesos diarios
-- **Actual** (`CURRENT_DAYS=7`): últimos 7 días — donde se evalúa si el tópico está creciendo
-
-Con el corpus real (201,568 textos, Dic 18 2025 – Mar 24 2026): ventana histórica = 82 días (Dic 18 – Mar 17), ventana actual = 7 días (Mar 17 – Mar 24). La separación usa `max_ts - CURRENT_DAYS` como cutoff.
-
 **Nota sobre el split temporal**: BERTopic se entrena con `fit_transform` sobre **todos** los textos (históricos + actuales combinados), y luego se separan las asignaciones por índice. No se usa `transform()` por separado porque HDBSCAN requiere `calculate_probabilities=True` para `transform()`, y esto genera un error KD-tree con corpus grandes. El split post-hoc es aceptable porque BERTopic es no supervisado y no tiene acceso a las etiquetas temporales durante el entrenamiento.
 
 ### Configuración
@@ -600,8 +594,8 @@ Reporta tiempo total y ms/texto para cada componente, y el overhead del agente R
 ### Recolección
 
 ```bash
-# Recolección histórica 82 días — Arctic Shift (RECOMENDADO para corpus completo)
-python -m scripts.collect_data --arctic --days 82
+# Recolección histórica 90 días — Arctic Shift (RECOMENDADO para corpus completo)
+python -m scripts.collect_data --arctic --days 90
 
 # Recolección tiempo real — PRAW (últimos ~7 días)
 python -m scripts.collect_data --days 7
