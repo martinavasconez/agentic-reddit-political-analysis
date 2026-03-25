@@ -11,9 +11,7 @@ Este proyecto implementa dos agentes autónomos que siguen el patrón **ReAct** 
 
 ## Corpus
 
-- **Recolección histórica**: 82 días vía [Arctic Shift API](https://arctic-shift.photon-reddit.com) (r/politics, Dic 2025 – Mar 2026)
-- **Recolección en tiempo real**: PRAW (Python Reddit API Wrapper), últimos 7 días
-- **Total**: ~12,000 posts · ~283,000 comentarios · 201,568 textos válidos preprocesados
+- **Recolección histórica**: 90 días vía [Arctic Shift API](https://arctic-shift.photon-reddit.com) (r/politics, Dic 2025 – Mar 2026)
 
 ## Resultados
 
@@ -21,11 +19,10 @@ Este proyecto implementa dos agentes autónomos que siguen el patrón **ReAct** 
 |---------|-------|
 | Accuracy vs DeepSeek V3 | 0.6827 |
 | F1 macro | 0.514 |
-| Agreement rate | 64.87% |
+| Agreement rate | 68.27% |
 | Coherencia temática c_v | 0.776 ✅ |
-| Estabilidad Jaccard (3 runs) | 0.794 ✅ |
-| Tópicos detectados | 236 |
-| Tendencias activas (última ejecución) | 20 |
+| Estabilidad Jaccard (3 runs) | 0.731 ✅ |
+| Tópicos detectados | 365 |
 
 ## Instalación
 
@@ -45,7 +42,7 @@ DEEPSEEK_API_KEY=...
 
 ```bash
 # 1. Recolección histórica (Arctic Shift)
-python -m scripts.collect_data --arctic --days 82
+python -m scripts.collect_data --arctic --days 90
 
 # 2. Recolección reciente (PRAW)
 python -m scripts.collect_data --days 7
