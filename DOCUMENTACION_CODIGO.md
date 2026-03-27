@@ -577,6 +577,52 @@ Jaccard = palabras en común / total palabras distintas entre dos tópicos
 
 Para cada par de runs, encuentra el mejor match por Jaccard para cada tópico. Promedia todos los scores. Ideal > 0.70.
 
+### `--groundtruth` — Métricas contra pseudo ground truth DeepSeek V3
+
+Calcula Accuracy, Precision, Recall y F1 macro comparando las predicciones de RoBERTa contra las pseudo-etiquetas generadas por DeepSeek V3. Excluye textos marcados como `ambiguous` por el agente (no hay predicción de clase). Muestra:
+- Reporte por clase con precision/recall/F1 y support
+- Matriz de confusión (filas=true, columnas=pred)
+- Agreement rate global
+
+### `--manual` — Validación manual del ground truth
+
+Compara etiquetas manuales (CSV anotado por humano) contra las pseudo-etiquetas de DeepSeek V3 para auditar la calidad del pseudo-labeling. Requiere un CSV con columna `manual_label` completada. Reporta:
+- Distribución de etiquetas (manual vs DeepSeek)
+- Accuracy de acuerdo y reporte por clase
+- Tipos de error específicos (manual → DeepSeek)
+
+### `--compare` — Comparación agentic vs pipeline tradicional
+
+Compara ambos enfoques sobre el mismo ground truth:
+- **Pipeline**: `roberta_label` directo sobre todos los textos (sin umbrales, sin VADER)
+- **Agentic**: `final_label` con mecanismo de tres caminos (accepted/cross_validated/ambiguous)
+
+Reporta accuracy y F1 macro de ambos, y analiza la **ganancia por abstención informada**: evalúa qué accuracy obtiene el pipeline sobre los textos que el agente clasifica como `ambiguous`, demostrando que forzar una etiqueta en esos casos introduce error cercano al azar.
+
+### `--delta` — Sensibilidad de parámetros Δ
+
+Análisis de sensibilidad del agente de tendencias sobre distintos valores de `DELTA_HIGH` y `DELTA_MODERATE`. Incluye:
+- Distribución de valores Δ (min, max, media, mediana)
+- Tabla de sensibilidad: cuántos tópicos se detectan por cada threshold
+- Separación emerging (coverage > 5%) vs localized (coverage ≤ 5%)
+
+### `--failure-modes` — Análisis estructurado de failure modes
+
+Análisis cualitativo y cuantitativo de **por qué** falla el sistema, no solo cuánto falla. Incluye 8 sub-análisis:
+
+1. **FM1 — Patrones de confusión**: Qué pares de clases se confunden más (ej. neutral→negative) y con qué frecuencia
+2. **FM2 — Errores por tipo de decisión**: Tasa de error en textos `accepted` vs `cross_validated`, confirmando que la zona de confianza intermedia es más propensa a error
+3. **FM3 — Errores por rango de confianza**: Desglose de tasa de error por banda de confianza (alta/media-alta/media-baja)
+4. **FM4 — Errores por longitud de texto**: Relación entre longitud del texto y probabilidad de clasificación incorrecta
+5. **FM5 — Sarcasmo e ironía**: Detección de indicadores de sarcasmo (`/s`, `lol`, comillas irónicas, adverbios irónicos, puntuación enfática) y su prevalencia relativa en errores vs aciertos (ratio)
+6. **FM6 — Comportamiento de VADER en errores cross_validated**: Cuántas veces VADER habría dado la respuesta correcta pero el agente priorizó RoBERTa
+7. **FM7 — Ejemplos representativos**: Textos concretos por cada tipo de confusión dominante, con confianza, decisión y razonamiento de DeepSeek
+8. **FM8 — Análisis de abstención**: Distribución real de los textos `ambiguous` y accuracy hipotética si se hubieran clasificado
+
+```bash
+python -m scripts.run_evaluation --failure-modes
+```
+
 ### `--latency` — Latencia comparativa
 
 Mide y compara:
@@ -681,6 +727,22 @@ python -m scripts.run_evaluation --all
 
 # Solo sentimiento (distribución, ambigüedad, acuerdo inter-modelo)
 python -m scripts.run_evaluation --sentiment
+
+# Métricas contra ground truth DeepSeek V3 (accuracy, F1, confusion matrix)
+python -m scripts.run_evaluation --groundtruth
+
+# Validación manual del ground truth (300 textos anotados)
+python -m scripts.run_evaluation --manual
+python -m scripts.run_evaluation --manual --manual-csv ruta/al/archivo.csv
+
+# Comparación agentic vs pipeline tradicional (mismas métricas, mismo GT)
+python -m scripts.run_evaluation --compare
+
+# Sensibilidad de parámetros Δ del agente de tendencias
+python -m scripts.run_evaluation --delta
+
+# Análisis de failure modes (por qué falla el sistema)
+python -m scripts.run_evaluation --failure-modes
 
 # Solo coherencia temática (c_v, UMass)
 python -m scripts.run_evaluation --topics
