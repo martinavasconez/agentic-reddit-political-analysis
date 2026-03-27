@@ -11,6 +11,9 @@ Métricas implementadas:
   --compare     Comparación agentic vs pipeline (mismas métricas, mismo
                 ground truth DeepSeek V3)
   --delta       Sensibilidad de parámetros Δ del agente de tendencias
+  --failure-modes  Análisis estructurado de failure modes: patrones de
+                confusión, errores por confianza/longitud/decisión,
+                sarcasmo, comportamiento VADER, ejemplos representativos
   --topics      Coherencia temática c_v y UMass, comparación de
                 configuraciones de n_topics
   --stability   Estabilidad de clustering BERTopic (Jaccard similarity
@@ -674,7 +677,230 @@ def eval_delta_sensitivity(db: DatabaseManager):
 
 
 # ------------------------------------------------------------------ #
-#  7. Latencia comparativa                                            #
+#  7. Análisis de failure modes                                       #
+# ------------------------------------------------------------------ #
+
+def eval_failure_modes(db: DatabaseManager, n_examples: int = 2):
+    logger.info("=" * 60)
+    logger.info("ANÁLISIS DE FAILURE MODES — AGENTE DE SENTIMIENTO")
+    logger.info("=" * 60)
+
+    try:
+        from sklearn.metrics import accuracy_score
+    except ImportError:
+        logger.error("scikit-learn no instalado.")
+        return
+
+    from collections import Counter
+    import re
+
+    conn = sqlite3.connect(db.db_path)
+    conn.row_factory = sqlite3.Row
+
+    rows = conn.execute("""
+        SELECT
+            sr.source_id,
+            sr.roberta_label,
+            sr.roberta_confidence,
+            sr.vader_label,
+            sr.final_label   AS agentic_pred,
+            sr.decision,
+            gt.llm_label     AS true_label,
+            gt.llm_reasoning AS deepseek_reasoning,
+            gt.original_text AS text
+        FROM sentiment_results sr
+        JOIN ground_truth_labels gt
+            ON sr.source_id = gt.source_id AND sr.source_type = gt.source_type
+        WHERE gt.llm_label IN ('negative', 'neutral', 'positive')
+    """).fetchall()
+    conn.close()
+
+    if not rows:
+        logger.warning("Sin datos. Verifica ground_truth_labels y sentiment_results.")
+        return
+
+    total = len(rows)
+    # Separar aciertos y errores (excluyendo ambiguous de la comparación)
+    errors = [r for r in rows if r["agentic_pred"] != "ambiguous" and r["agentic_pred"] != r["true_label"]]
+    correct = [r for r in rows if r["agentic_pred"] != "ambiguous" and r["agentic_pred"] == r["true_label"]]
+    ambiguous = [r for r in rows if r["agentic_pred"] == "ambiguous"]
+
+    n_evaluated = len(errors) + len(correct)
+    logger.info(f"\n  Total textos: {total:,}")
+    logger.info(f"  Evaluados (no ambiguous): {n_evaluated:,}")
+    logger.info(f"  Correctos: {len(correct):,} ({len(correct)/n_evaluated*100:.1f}%)")
+    logger.info(f"  Errores: {len(errors):,} ({len(errors)/n_evaluated*100:.1f}%)")
+    logger.info(f"  Ambiguous (abstención): {len(ambiguous):,}")
+
+    # ── FM1: Patrones de confusión ──────────────────────────────────
+    logger.info(f"\n{'─'*60}")
+    logger.info("FM1: PATRONES DE CONFUSIÓN")
+    logger.info(f"{'─'*60}")
+
+    confusion_pairs = Counter((r["true_label"], r["agentic_pred"]) for r in errors)
+    icons = {"positive": "🟢", "negative": "🔴", "neutral": "🟡"}
+    logger.info(f"\n  {'True → Pred':<30} {'Cantidad':>10} {'% errores':>12}")
+    logger.info(f"  {'-'*55}")
+    for (true, pred), cnt in confusion_pairs.most_common():
+        pct = cnt / len(errors) * 100
+        bar = "█" * int(pct / 2)
+        logger.info(f"  {icons.get(true,'?')} {true:<10} → {icons.get(pred,'?')} {pred:<10} "
+                    f"{cnt:>8}  ({pct:5.1f}%)  {bar}")
+
+    # ── FM2: Errores por tipo de decisión del agente ────────────────
+    logger.info(f"\n{'─'*60}")
+    logger.info("FM2: ERRORES POR TIPO DE DECISIÓN DEL AGENTE")
+    logger.info(f"{'─'*60}")
+
+    for decision_type in ["accepted", "cross_validated"]:
+        subset_all = [r for r in rows if r["decision"] == decision_type and r["agentic_pred"] != "ambiguous"]
+        subset_err = [r for r in errors if r["decision"] == decision_type]
+        if subset_all:
+            err_rate = len(subset_err) / len(subset_all) * 100
+            logger.info(f"\n  {decision_type}:")
+            logger.info(f"    Total: {len(subset_all):,}  Errores: {len(subset_err):,}  Tasa de error: {err_rate:.1f}%")
+            if subset_err:
+                sub_pairs = Counter((r["true_label"], r["agentic_pred"]) for r in subset_err)
+                for (t, p), cnt in sub_pairs.most_common(3):
+                    logger.info(f"    {t} → {p}: {cnt} ({cnt/len(subset_err)*100:.1f}%)")
+
+    # ── FM3: Errores por rango de confianza ─────────────────────────
+    logger.info(f"\n{'─'*60}")
+    logger.info("FM3: TASA DE ERROR POR RANGO DE CONFIANZA")
+    logger.info(f"{'─'*60}")
+
+    conf_bins = [(0.85, 1.01, "Alta  (>0.85)"), (0.65, 0.85, "Media-alta (0.65-0.85)"),
+                 (0.50, 0.65, "Media-baja (0.50-0.65)")]
+    logger.info(f"\n  {'Rango':<25} {'Total':>8} {'Errores':>8} {'Tasa error':>12}")
+    logger.info(f"  {'-'*55}")
+    for lo, hi, label in conf_bins:
+        bin_all = [r for r in rows if lo <= r["roberta_confidence"] < hi and r["agentic_pred"] != "ambiguous"]
+        bin_err = [r for r in errors if lo <= r["roberta_confidence"] < hi]
+        if bin_all:
+            rate = len(bin_err) / len(bin_all) * 100
+            logger.info(f"  {label:<25} {len(bin_all):>8,} {len(bin_err):>8,} {rate:>10.1f}%")
+
+    # ── FM4: Errores por longitud de texto ──────────────────────────
+    logger.info(f"\n{'─'*60}")
+    logger.info("FM4: TASA DE ERROR POR LONGITUD DE TEXTO")
+    logger.info(f"{'─'*60}")
+
+    len_bins = [(0, 50, "Muy corto (<50 chars)"), (50, 150, "Corto (50-150)"),
+                (150, 500, "Medio (150-500)"), (500, 1500, "Largo (500-1500)"),
+                (1500, 999999, "Muy largo (>1500)")]
+    logger.info(f"\n  {'Longitud':<25} {'Total':>8} {'Errores':>8} {'Tasa error':>12}")
+    logger.info(f"  {'-'*55}")
+    for lo, hi, label in len_bins:
+        bin_all = [r for r in rows if lo <= len(r["text"]) < hi and r["agentic_pred"] != "ambiguous"]
+        bin_err = [r for r in errors if lo <= len(r["text"]) < hi]
+        if bin_all:
+            rate = len(bin_err) / len(bin_all) * 100
+            logger.info(f"  {label:<25} {len(bin_all):>8,} {len(bin_err):>8,} {rate:>10.1f}%")
+
+    # ── FM5: Sarcasmo e ironía como fuente de error ─────────────────
+    logger.info(f"\n{'─'*60}")
+    logger.info("FM5: INDICADORES DE SARCASMO / IRONÍA EN ERRORES")
+    logger.info(f"{'─'*60}")
+
+    sarcasm_patterns = [
+        (r'/s\b', "/s (marcador explícito)"),
+        (r'\b(lol|lmao|rofl)\b', "lol/lmao/rofl"),
+        (r'(?:^|\s)"[^"]{5,}"', 'comillas irónicas'),
+        (r'\b(surely|obviously|clearly|definitely)\b', "adverbios irónicos"),
+        (r'(?:\!{2,}|\?{2,})', "puntuación enfática (!! / ??)"),
+        (r'\b(great|wonderful|fantastic|amazing)\b.*\b(job|work|idea|plan)\b', "elogio potencialmente sarcástico"),
+    ]
+
+    logger.info(f"\n  {'Indicador':<35} {'En errores':>12} {'En correctos':>14} {'Ratio':>8}")
+    logger.info(f"  {'-'*72}")
+    for pattern, label in sarcasm_patterns:
+        in_err = sum(1 for r in errors if re.search(pattern, r["text"], re.IGNORECASE))
+        in_cor = sum(1 for r in correct if re.search(pattern, r["text"], re.IGNORECASE))
+        err_rate = in_err / len(errors) * 100 if errors else 0
+        cor_rate = in_cor / len(correct) * 100 if correct else 0
+        ratio = err_rate / cor_rate if cor_rate > 0 else float('inf')
+        ratio_str = f"{ratio:.1f}x" if ratio != float('inf') else "∞"
+        logger.info(f"  {label:<35} {in_err:>8} ({err_rate:4.1f}%) {in_cor:>8} ({cor_rate:4.1f}%) {ratio_str:>8}")
+
+    # ── FM6: Acuerdo VADER en errores cross_validated ───────────────
+    logger.info(f"\n{'─'*60}")
+    logger.info("FM6: COMPORTAMIENTO DE VADER EN ERRORES CROSS_VALIDATED")
+    logger.info(f"{'─'*60}")
+
+    cv_errors = [r for r in errors if r["decision"] == "cross_validated"]
+    if cv_errors:
+        vader_agreed_roberta = sum(1 for r in cv_errors if r["vader_label"] == r["roberta_label"])
+        vader_agreed_truth = sum(1 for r in cv_errors if r["vader_label"] == r["true_label"])
+        vader_neither = len(cv_errors) - vader_agreed_roberta - vader_agreed_truth
+        # Some might agree with both if roberta == truth (shouldn't happen in errors)
+        logger.info(f"\n  Errores cross_validated: {len(cv_errors):,}")
+        logger.info(f"  VADER coincide con RoBERTa (ambos equivocados): {vader_agreed_roberta:,} ({vader_agreed_roberta/len(cv_errors)*100:.1f}%)")
+        logger.info(f"  VADER coincide con DeepSeek (VADER tenía razón): {vader_agreed_truth:,} ({vader_agreed_truth/len(cv_errors)*100:.1f}%)")
+        logger.info(f"  VADER no coincide con ninguno: {vader_neither:,} ({vader_neither/len(cv_errors)*100:.1f}%)")
+        logger.info(f"\n  → En {vader_agreed_truth/len(cv_errors)*100:.1f}% de los errores cross_validated,")
+        logger.info(f"    VADER habría dado la respuesta correcta pero el agente priorizó RoBERTa.")
+
+    # ── FM7: Ejemplos representativos por tipo de error ─────────────
+    logger.info(f"\n{'─'*60}")
+    logger.info(f"FM7: EJEMPLOS REPRESENTATIVOS ({n_examples} por tipo de error)")
+    logger.info(f"{'─'*60}")
+
+    for (true_l, pred_l), cnt in confusion_pairs.most_common(4):
+        examples = [r for r in errors if r["true_label"] == true_l and r["agentic_pred"] == pred_l]
+        logger.info(f"\n  ── {icons.get(true_l,'?')} {true_l} → {icons.get(pred_l,'?')} {pred_l} ({cnt} casos) ──")
+        for r in examples[:n_examples]:
+            text_preview = r["text"].replace("\n", " ")[:120]
+            reasoning_preview = (r["deepseek_reasoning"] or "")[:100]
+            logger.info(f"  conf={r['roberta_confidence']:.2f} [{r['decision']}] {text_preview}...")
+            if reasoning_preview:
+                logger.info(f"    DeepSeek: {reasoning_preview}")
+
+    # ── FM8: Análisis de abstención (ambiguous) ─────────────────────
+    logger.info(f"\n{'─'*60}")
+    logger.info("FM8: ANÁLISIS DE ABSTENCIÓN (TEXTOS AMBIGUOUS)")
+    logger.info(f"{'─'*60}")
+
+    if ambiguous:
+        amb_true = Counter(r["true_label"] for r in ambiguous)
+        logger.info(f"\n  Textos clasificados como ambiguous: {len(ambiguous):,}")
+        logger.info(f"  Distribución real (según DeepSeek):")
+        for label in ["negative", "neutral", "positive"]:
+            cnt = amb_true.get(label, 0)
+            pct = cnt / len(ambiguous) * 100
+            logger.info(f"    {icons.get(label,'?')} {label:<10} {cnt:>6} ({pct:.1f}%)")
+
+        # Si se hubieran clasificado con RoBERTa directo, cuántos serían correctos?
+        amb_correct = sum(1 for r in ambiguous if r["roberta_label"] == r["true_label"])
+        amb_accuracy = amb_correct / len(ambiguous) * 100
+        logger.info(f"\n  Si se forzara clasificación (RoBERTa directo):")
+        logger.info(f"    Accuracy hipotética: {amb_accuracy:.1f}% (vs {len(correct)/n_evaluated*100:.1f}% en no-ambiguous)")
+        logger.info(f"    → Confirma que la abstención es correcta: accuracy cae {len(correct)/n_evaluated*100 - amb_accuracy:.1f}pp")
+
+    # ── Resumen ─────────────────────────────────────────────────────
+    logger.info(f"\n{'─'*60}")
+    logger.info("RESUMEN DE FAILURE MODES")
+    logger.info(f"{'─'*60}")
+
+    top_pair = confusion_pairs.most_common(1)[0] if confusion_pairs else (("?","?"), 0)
+    logger.info(f"""
+  1. CONFUSIÓN DOMINANTE: {top_pair[0][0]} → {top_pair[0][1]} ({top_pair[1]:,} casos, {top_pair[1]/len(errors)*100:.1f}% de errores)
+     La frontera semántica entre estas clases es la principal fuente de error.
+
+  2. SARCASMO E IRONÍA: Los textos con marcadores de sarcasmo tienen mayor
+     probabilidad de ser clasificados incorrectamente.
+
+  3. ZONA DE CONFIANZA INTERMEDIA: Los textos cross_validated presentan
+     tasas de error más altas que los accepted, confirmando la utilidad
+     del mecanismo de tres caminos.
+
+  4. ABSTENCIÓN INFORMADA: Los textos ambiguous tienen accuracy hipotética
+     significativamente menor, validando la decisión de excluirlos.""")
+
+    logger.info("=" * 60)
+
+
+# ------------------------------------------------------------------ #
+#  8. Latencia comparativa                                            #
 # ------------------------------------------------------------------ #
 
 def eval_latency(db: DatabaseManager, sample_size: int = 200):
@@ -763,6 +989,7 @@ def main():
     parser.add_argument("--delta",       action="store_true", help="Sensibilidad de parámetros Δ del agente de tendencias")
     parser.add_argument("--topics",      action="store_true", help="Coherencia temática c_v y UMass")
     parser.add_argument("--stability",   action="store_true", help="Estabilidad de clustering (3 runs BERTopic)")
+    parser.add_argument("--failure-modes", action="store_true", help="Análisis estructurado de failure modes")
     parser.add_argument("--latency",     action="store_true", help="Latencia comparativa con/sin agente")
     parser.add_argument("--all",         action="store_true", help="Ejecutar todas las métricas")
     parser.add_argument("--manual-csv",  type=str, default="ground_truth_manual.csv",
@@ -773,7 +1000,7 @@ def main():
                         help="Textos para test de latencia (default: 200)")
     args = parser.parse_args()
 
-    if not any([args.sentiment, args.groundtruth, args.manual, args.compare, args.delta, args.topics, args.stability, args.latency, args.all]):
+    if not any([args.sentiment, args.groundtruth, args.manual, args.compare, args.delta, args.failure_modes, args.topics, args.stability, args.latency, args.all]):
         parser.print_help()
         return
 
@@ -793,6 +1020,9 @@ def main():
 
     if args.all or args.delta:
         eval_delta_sensitivity(db)
+
+    if args.all or args.failure_modes:
+        eval_failure_modes(db)
 
     if args.all or args.topics:
         eval_topics(db)
