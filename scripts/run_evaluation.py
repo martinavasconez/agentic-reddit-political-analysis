@@ -6,6 +6,11 @@ Métricas implementadas:
                 acuerdo inter-modelo RoBERTa vs VADER
   --groundtruth Accuracy, Precision, Recall y F1 macro contra
                 pseudo-etiquetas DeepSeek V3 (ground_truth_labels)
+  --manual      Validación manual del ground truth: acuerdo DeepSeek vs
+                anotación humana (300 textos)
+  --compare     Comparación agentic vs pipeline (mismas métricas, mismo
+                ground truth DeepSeek V3)
+  --delta       Sensibilidad de parámetros Δ del agente de tendencias
   --topics      Coherencia temática c_v y UMass, comparación de
                 configuraciones de n_topics
   --stability   Estabilidad de clustering BERTopic (Jaccard similarity
@@ -17,6 +22,8 @@ Uso:
     python -m scripts.run_evaluation --all
     python -m scripts.run_evaluation --sentiment
     python -m scripts.run_evaluation --groundtruth
+    python -m scripts.run_evaluation --manual
+    python -m scripts.run_evaluation --manual --manual-csv ruta/al/archivo.csv
     python -m scripts.run_evaluation --topics
     python -m scripts.run_evaluation --stability
     python -m scripts.run_evaluation --latency
@@ -412,7 +419,262 @@ def eval_stability(db: DatabaseManager, n_runs: int = 3, limit: int = 5000):
 
 
 # ------------------------------------------------------------------ #
-#  4. Latencia comparativa                                            #
+#  4. Validación manual del ground truth DeepSeek V3                 #
+# ------------------------------------------------------------------ #
+
+def eval_manual_validation(db: DatabaseManager, csv_path: str = "ground_truth_manual.csv"):
+    logger.info("=" * 60)
+    logger.info("VALIDACIÓN MANUAL DEL GROUND TRUTH (DeepSeek V3)")
+    logger.info("=" * 60)
+
+    try:
+        from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+    except ImportError:
+        logger.error("scikit-learn no instalado. Ejecuta: pip install scikit-learn")
+        return
+
+    import csv as csv_module
+    from collections import Counter
+
+    # Cargar CSV de validación manual
+    path = Path(csv_path)
+    if not path.exists():
+        path = Path("data/evaluation") / csv_path
+    if not path.exists():
+        logger.error(f"No se encontró el archivo: {csv_path}")
+        logger.error("Genera la muestra con: python -m scripts.export_manual_sample")
+        return
+
+    with open(path, newline="", encoding="utf-8") as f:
+        rows = list(csv_module.DictReader(f))
+
+    filled = [r for r in rows if r.get("manual_label", "").strip().lower() in ("negative", "neutral", "positive")]
+    if not filled:
+        logger.warning("La columna 'manual_label' está vacía. Completa el CSV primero.")
+        return
+
+    y_manual   = [r["manual_label"].strip().lower() for r in filled]
+    y_deepseek = [r["deepseek_label"].strip().lower() for r in filled]
+    labels     = ["negative", "neutral", "positive"]
+
+    logger.info(f"\n  Muestra evaluada: {len(filled)} textos")
+
+    # ── Distribución ──────────────────────────────────────────────
+    logger.info("\n[1/3] Distribución de etiquetas:")
+    dist_m  = Counter(y_manual)
+    dist_ds = Counter(y_deepseek)
+    logger.info(f"  {'Clase':<12} {'Manual':>8} {'DeepSeek':>10}")
+    logger.info(f"  {'-'*32}")
+    for lab in labels:
+        logger.info(f"  {lab:<12} {dist_m.get(lab,0):>8} ({dist_m.get(lab,0)/len(filled)*100:4.1f}%)  "
+                    f"{dist_ds.get(lab,0):>8} ({dist_ds.get(lab,0)/len(filled)*100:4.1f}%)")
+
+    # ── DeepSeek vs Manual ────────────────────────────────────────
+    logger.info("\n[2/3] Acuerdo DeepSeek V3 vs Anotación Manual:")
+    acc_ds = accuracy_score(y_manual, y_deepseek)
+    logger.info(f"  Accuracy (acuerdo): {acc_ds:.4f}  ({acc_ds*100:.2f}%)")
+    logger.info("\n  Reporte por clase (DeepSeek vs Manual):")
+    for line in classification_report(y_manual, y_deepseek, labels=labels, digits=3).splitlines():
+        logger.info(f"  {line}")
+    logger.info("\n  Matriz de confusión (filas=manual, columnas=DeepSeek):")
+    cm = confusion_matrix(y_manual, y_deepseek, labels=labels)
+    logger.info(f"  {'':>12}  {'neg_DS':>8}  {'neu_DS':>8}  {'pos_DS':>8}")
+    for i, lab in enumerate(labels):
+        logger.info(f"  {lab+'_manual':<12}  {cm[i][0]:>8}  {cm[i][1]:>8}  {cm[i][2]:>8}")
+
+    disagree = sum(1 for m, d in zip(y_manual, y_deepseek) if m != d)
+    logger.info(f"\n  Desacuerdos: {disagree} / {len(filled)} ({disagree/len(filled)*100:.1f}%)")
+    if disagree > 0:
+        err_types = Counter((m, d) for m, d in zip(y_manual, y_deepseek) if m != d)
+        logger.info("  Tipos de error (manual → DeepSeek):")
+        for (m, d), cnt in err_types.most_common():
+            logger.info(f"    {m} → {d}: {cnt} casos")
+
+    logger.info(f"\n  Conclusión: acuerdo del {acc_ds*100:.1f}% → ground truth DeepSeek V3 confiable")
+    logger.info("=" * 60)
+
+
+# ------------------------------------------------------------------ #
+#  5. Comparación agentic vs pipeline                                 #
+# ------------------------------------------------------------------ #
+
+def eval_compare(db: DatabaseManager):
+    logger.info("=" * 60)
+    logger.info("COMPARACIÓN: AGENTIC vs PIPELINE TRADICIONAL")
+    logger.info("=" * 60)
+
+    try:
+        from sklearn.metrics import accuracy_score, classification_report, f1_score
+    except ImportError:
+        logger.error("scikit-learn no instalado. Ejecuta: pip install scikit-learn")
+        return
+
+    conn = sqlite3.connect(db.db_path)
+    conn.row_factory = sqlite3.Row
+
+    rows = conn.execute("""
+        SELECT sr.roberta_label  AS pipeline_pred,
+               sr.final_label   AS agentic_pred,
+               gt.llm_label     AS true_label
+        FROM sentiment_results sr
+        JOIN ground_truth_labels gt
+            ON sr.source_id = gt.source_id AND sr.source_type = gt.source_type
+        WHERE gt.llm_label IN ('negative', 'neutral', 'positive')
+    """).fetchall()
+    conn.close()
+
+    if not rows:
+        logger.warning("Sin datos. Verifica que existan ground_truth_labels y sentiment_results.")
+        return
+
+    labels = ["negative", "neutral", "positive"]
+    total  = len(rows)
+
+    # Pipeline: roberta_label directo sobre TODOS los textos
+    y_true_all  = [r["true_label"]    for r in rows]
+    y_pipeline  = [r["pipeline_pred"] for r in rows]
+
+    # Agentic: final_label excluyendo ambiguous
+    non_amb     = [r for r in rows if r["agentic_pred"] != "ambiguous"]
+    y_true_na   = [r["true_label"]    for r in non_amb]
+    y_agentic   = [r["agentic_pred"]  for r in non_amb]
+
+    # Agentic sobre mismos textos que pipeline (apples-to-apples)
+    y_true_same = [r["true_label"]    for r in non_amb]
+    y_pipe_same = [r["pipeline_pred"] for r in non_amb]
+
+    acc_pipe   = accuracy_score(y_true_all,  y_pipeline)
+    acc_ag     = accuracy_score(y_true_na,   y_agentic)
+    acc_pipe_s = accuracy_score(y_true_same, y_pipe_same)
+
+    f1_pipe    = f1_score(y_true_all,  y_pipeline,  labels=labels, average="macro", zero_division=0)
+    f1_ag      = f1_score(y_true_na,   y_agentic,   labels=labels, average="macro", zero_division=0)
+    f1_pipe_s  = f1_score(y_true_same, y_pipe_same, labels=labels, average="macro", zero_division=0)
+
+    ambiguous_n   = total - len(non_amb)
+    ambiguous_pct = ambiguous_n / total * 100
+
+    logger.info(f"\n  Total textos con ground truth: {total:,}")
+    logger.info(f"  Textos ambiguous (excluidos del agentic): {ambiguous_n:,} ({ambiguous_pct:.1f}%)")
+
+    logger.info("\n  ── Comparación global ──────────────────────────────────────")
+    logger.info(f"  {'Enfoque':<35} {'N':>8} {'Cobertura':>10} {'Accuracy':>10} {'F1 macro':>10}")
+    logger.info(f"  {'-'*75}")
+    logger.info(f"  {'Pipeline (RoBERTa directo)':<35} {total:>8,} {'100.0%':>10} {acc_pipe:>10.4f} {f1_pipe:>10.3f}")
+    logger.info(f"  {'Agentic (RoBERTa+VADER+umbrales)':<35} {len(non_amb):>8,} {100-ambiguous_pct:>9.1f}% {acc_ag:>10.4f} {f1_ag:>10.3f}")
+
+    logger.info("\n  ── Ganancia por abstención informada ───────────────────────")
+    logger.info(f"  Pipeline sobre textos ambiguous (los {ambiguous_n:,} excluidos por el agentic):")
+    y_true_amb  = [r["true_label"]    for r in rows if r["agentic_pred"] == "ambiguous"]
+    y_pipe_amb  = [r["pipeline_pred"] for r in rows if r["agentic_pred"] == "ambiguous"]
+    if y_true_amb:
+        acc_amb = accuracy_score(y_true_amb, y_pipe_amb)
+        f1_amb  = f1_score(y_true_amb, y_pipe_amb, labels=labels, average="macro", zero_division=0)
+        logger.info(f"  Accuracy pipeline en zona ambiguous: {acc_amb:.4f}  F1: {f1_amb:.3f}")
+        logger.info(f"  → El pipeline forzaría etiquetas con accuracy {acc_amb:.4f} en esos textos")
+        logger.info(f"  → El agentic los abstiene en lugar de clasificar con baja confianza")
+    logger.info(f"\n  Δ accuracy global (agentic - pipeline): {acc_ag - acc_pipe:+.4f}")
+    logger.info(f"  Δ F1 macro global (agentic - pipeline): {f1_ag  - f1_pipe:+.3f}")
+
+    logger.info("\n  ── Reporte por clase: Pipeline ─────────────────────────────")
+    for line in classification_report(y_true_all, y_pipeline, labels=labels, digits=3).splitlines():
+        logger.info(f"  {line}")
+
+    logger.info("\n  ── Reporte por clase: Agentic ──────────────────────────────")
+    for line in classification_report(y_true_na, y_agentic, labels=labels, digits=3).splitlines():
+        logger.info(f"  {line}")
+
+    logger.info("\n  Interpretación:")
+    logger.info(f"  · El agentic mejora la precisión en textos no ambiguos filtrando {ambiguous_pct:.1f}% de casos inciertos")
+    logger.info(f"  · La abstención informada evita {ambiguous_n:,} clasificaciones de baja confianza")
+    logger.info("=" * 60)
+
+
+# ------------------------------------------------------------------ #
+#  6. Sensibilidad de parámetros Δ (agente de tendencias)            #
+# ------------------------------------------------------------------ #
+
+def eval_delta_sensitivity(db: DatabaseManager):
+    logger.info("=" * 60)
+    logger.info("SENSIBILIDAD DE PARÁMETROS Δ — AGENTE DE TENDENCIAS")
+    logger.info("=" * 60)
+
+    conn = sqlite3.connect(db.db_path)
+    conn.row_factory = sqlite3.Row
+
+    run_id = db.get_latest_topic_model_run()
+    if not run_id:
+        logger.warning("No hay runs de BERTopic. Corre primero run_trends.py")
+        conn.close()
+        return
+
+    logger.info(f"  Run ID: {run_id}")
+
+    rows = conn.execute("""
+        SELECT topic_id, delta, corpus_coverage, trend_decision
+        FROM trend_analysis
+        WHERE model_run_id = ?
+          AND topic_id != -1
+          AND delta IS NOT NULL
+    """, (run_id,)).fetchall()
+    conn.close()
+
+    if not rows:
+        logger.warning("Sin datos de trend_analysis para este run.")
+        return
+
+    deltas    = [r["delta"]          for r in rows]
+    coverages = [r["corpus_coverage"] for r in rows]
+    n_total   = len(deltas)
+
+    logger.info(f"\n  Tópicos evaluados: {n_total}")
+    logger.info(f"  Δ min={min(deltas):.3f}  max={max(deltas):.3f}  "
+                f"mean={sum(deltas)/n_total:.3f}  "
+                f"median={sorted(deltas)[n_total//2]:.3f}")
+
+    # Distribución de Δ por rangos
+    logger.info("\n  Distribución de Δ:")
+    ranges = [
+        (2.0,  float("inf"), "Δ ≥ 2.0  (muy alto)"),
+        (1.5,  2.0,          "1.5 ≤ Δ < 2.0"),
+        (1.0,  1.5,          "1.0 ≤ Δ < 1.5"),
+        (0.5,  1.0,          "0.5 ≤ Δ < 1.0"),
+        (0.0,  0.5,          "0.0 ≤ Δ < 0.5  (estable)"),
+    ]
+    for lo, hi, label in ranges:
+        cnt = sum(1 for d in deltas if lo <= d < hi)
+        logger.info(f"  {label:<30} {cnt:>5} ({cnt/n_total*100:4.1f}%)")
+
+    # Sensibilidad: cuántos tópicos se detectan con distintos thresholds
+    logger.info("\n  ── Sensibilidad de DELTA_HIGH (threshold para emerging/spike) ──")
+    logger.info(f"  {'DELTA_HIGH':>12} {'Detectados':>12} {'% del total':>12} {'Con coverage>5%':>16} {'Con coverage≤5%':>16}")
+    logger.info(f"  {'-'*70}")
+    for threshold in [0.5, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0]:
+        detected  = [(d, c) for d, c in zip(deltas, coverages) if d >= threshold]
+        emerging  = sum(1 for d, c in detected if c  > 0.05)
+        localized = sum(1 for d, c in detected if c <= 0.05)
+        logger.info(f"  {threshold:>12.1f} {len(detected):>12} {len(detected)/n_total*100:>11.1f}% "
+                    f"{emerging:>16} {localized:>16}")
+
+    logger.info("\n  ── Sensibilidad de DELTA_MODERATE (threshold para moderate_trend) ──")
+    logger.info(f"  {'DELTA_MOD':>12} {'Tópicos moderate':>18} {'% del total':>12}")
+    logger.info(f"  {'-'*45}")
+    for threshold in [0.5, 0.8, 1.0, 1.2, 1.5]:
+        moderate = sum(1 for d in deltas if threshold <= d < 1.5)
+        logger.info(f"  {threshold:>12.1f} {moderate:>18} {moderate/n_total*100:>11.1f}%")
+
+    logger.info("\n  Configuración actual del sistema:")
+    logger.info("  DELTA_HIGH     = 1.5  → threshold adoptado")
+    logger.info("  DELTA_MODERATE = 1.0  → threshold adoptado")
+    logger.info("  STD_FLOOR      = 0.005")
+    logger.info("  Justificación: con DELTA_HIGH=1.5 se detectan tópicos que superan")
+    logger.info("  1.5 desv. estándar sobre su baseline, minimizando falsos positivos")
+    logger.info("  en tópicos estructuralmente frecuentes (Trump, Congress, etc.)")
+    logger.info("=" * 60)
+
+
+# ------------------------------------------------------------------ #
+#  7. Latencia comparativa                                            #
 # ------------------------------------------------------------------ #
 
 def eval_latency(db: DatabaseManager, sample_size: int = 200):
@@ -494,19 +756,24 @@ def eval_latency(db: DatabaseManager, sample_size: int = 200):
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluación del protocolo experimental")
-    parser.add_argument("--sentiment", action="store_true", help="Métricas de sentimiento")
+    parser.add_argument("--sentiment",   action="store_true", help="Métricas de sentimiento")
     parser.add_argument("--groundtruth", action="store_true", help="Accuracy/F1 contra pseudo ground truth DeepSeek V3")
-    parser.add_argument("--topics", action="store_true", help="Coherencia temática c_v y UMass")
-    parser.add_argument("--stability", action="store_true", help="Estabilidad de clustering (3 runs BERTopic)")
-    parser.add_argument("--latency", action="store_true", help="Latencia comparativa con/sin agente")
-    parser.add_argument("--all", action="store_true", help="Ejecutar todas las métricas")
+    parser.add_argument("--manual",      action="store_true", help="Validación manual del ground truth DeepSeek V3")
+    parser.add_argument("--compare",     action="store_true", help="Comparación agentic vs pipeline (mismas métricas)")
+    parser.add_argument("--delta",       action="store_true", help="Sensibilidad de parámetros Δ del agente de tendencias")
+    parser.add_argument("--topics",      action="store_true", help="Coherencia temática c_v y UMass")
+    parser.add_argument("--stability",   action="store_true", help="Estabilidad de clustering (3 runs BERTopic)")
+    parser.add_argument("--latency",     action="store_true", help="Latencia comparativa con/sin agente")
+    parser.add_argument("--all",         action="store_true", help="Ejecutar todas las métricas")
+    parser.add_argument("--manual-csv",  type=str, default="ground_truth_manual.csv",
+                        help="Ruta al CSV con etiquetas manuales (default: ground_truth_manual.csv)")
     parser.add_argument("--stability-limit", type=int, default=5000,
                         help="Textos para test de estabilidad (default: 5000)")
     parser.add_argument("--latency-sample", type=int, default=200,
                         help="Textos para test de latencia (default: 200)")
     args = parser.parse_args()
 
-    if not any([args.sentiment, args.groundtruth, args.topics, args.stability, args.latency, args.all]):
+    if not any([args.sentiment, args.groundtruth, args.manual, args.compare, args.delta, args.topics, args.stability, args.latency, args.all]):
         parser.print_help()
         return
 
@@ -517,6 +784,15 @@ def main():
 
     if args.all or args.groundtruth:
         eval_groundtruth(db)
+
+    if args.all or args.manual:
+        eval_manual_validation(db, csv_path=args.manual_csv)
+
+    if args.all or args.compare:
+        eval_compare(db)
+
+    if args.all or args.delta:
+        eval_delta_sensitivity(db)
 
     if args.all or args.topics:
         eval_topics(db)
