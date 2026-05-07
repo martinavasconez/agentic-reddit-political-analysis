@@ -21,30 +21,50 @@ Split temporal (según protocolo de evaluación):
     válido porque BERTopic es no supervisado (no tiene acceso a etiquetas
     temporales durante el entrenamiento).
 
-    Ventana histórica: max_ts - CURRENT_DAYS hacia atrás (~82 días con corpus de 89 días)
-    Ventana actual:    últimos CURRENT_DAYS días (~7 días)
+Ventana adaptativa:
+    W_eval = max(W_stat, W_lifecycle)
+
+    W_stat = N_min / λ
+      Garantiza estabilidad estadística. N_min se deriva del Teorema
+      Central del Límite para proporciones binomiales: para estimar la
+      proporción p de un tópico con margen de error δ = p/2 al 95% de
+      confianza, se necesitan N_min = z² × p(1-p) / δ² observaciones
+      (Cochran, 1977). Con p_min = 5% (COVERAGE_THRESHOLD):
+      N_min = 1.96² × 0.05 × 0.95 / 0.025² ≈ 292 textos.
+
+    W_lifecycle = α × T_½
+      Garantiza capturar el ciclo de vida del tópico. T_½ es la vida
+      media empírica, medida ajustando decaimiento exponencial f(t) =
+      e^(-λt) a la curva post-pico de cada tópico (Leskovec et al.,
+      2009). α = 2 captura ~75% del ciclo (suficiente para detectar
+      la fase de crecimiento + pico).
+
+    Con corpus denso (alto λ), W_lifecycle domina → ventana corta.
+    Con corpus escaso (bajo λ), W_stat domina → ventana más larga.
+
+    Refs:
+      - Cochran (1977): Sampling Techniques — fórmula de tamaño muestral
+      - Leskovec et al. (2009): Meme-tracking — decaimiento exponencial
+      - Kleinberg (2002): Bursty Structure in Streams — ventanas adaptativas
+      - Mathioudakis & Koudas (2010): TwitterMonitor — detección en streams
 
 Decisiones (umbrales calibrados con corpus real):
     Δ ≥ 1.5 y coverage > 5%  → emerging_trend
     Δ ≥ 1.5 y coverage ≤ 5%  → localized_spike
-    1.0 ≤ Δ < 1.5 y 3+ días creciendo → moderate_trend
-    1.0 ≤ Δ < 1.5 y decreciendo       → discarded (pico pasajero)
+    1.0 ≤ Δ < 1.5 y peso actual > media → moderate_trend
+    1.0 ≤ Δ < 1.5 y peso actual < media → discarded (pico pasajero)
     Δ < 1.0                            → discarded
-
-Nota sobre estabilidad estadística:
-    Con 82 días de baseline la desviación estándar histórica se calcula
-    sobre ~82 puntos diarios, lo cual es estadísticamente robusto.
-    STD_FLOOR = 0.005 protege contra tópicos con varianza históricamente
-    baja que generarían Δ artificialmente alto.
 """
 
 import json
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
 from loguru import logger
+from scipy.optimize import curve_fit
 
 from src.database.db_manager import DatabaseManager
 
@@ -55,9 +75,13 @@ COVERAGE_THRESHOLD = 0.05  # 5% del corpus = tendencia emergente vs spike locali
 STD_FLOOR = 0.005          # Floor mínimo para desv. estándar (evita Δ artificialmente alto)
 MIN_TOPIC_TEXTS = 10       # Textos mínimos en ventana actual para evaluar un tópico
 
-# Split temporal dinámico: cutoff = max_ts - CURRENT_DAYS
-HISTORICAL_DAYS = 60       # Referencia de ventana histórica (con corpus de 89 días: ~82 días efectivos)
-CURRENT_DAYS = 7           # Días de ventana de evaluación
+# Parámetros de ventana adaptativa
+CONFIDENCE_Z = 1.96        # z para intervalo de confianza 95%
+LIFECYCLE_ALPHA = 2        # Multiplicador de vida media (α=2 → captura ~75% del ciclo)
+FALLBACK_WINDOW_DAYS = 2   # Fallback si no se puede calcular half-life
+MIN_WINDOW_HOURS = 6       # Mínimo absoluto de ventana (evita ruido extremo)
+MAX_WINDOW_DAYS = 7        # Máximo absoluto (evita diluir señal)
+MIN_PEAK_TEXTS = 20        # Mínimo de textos en pico para calcular half-life de un tópico
 
 # Stopwords custom: palabras genéricas de Reddit/discusión que no aportan semántica política
 REDDIT_STOPWORDS = [
@@ -86,16 +110,15 @@ class TrendsAgent:
         self,
         db: Optional[DatabaseManager] = None,
         n_topics: Optional[int] = None,     # None = auto-detección BERTopic
-        historical_days: int = HISTORICAL_DAYS,
-        current_days: int = CURRENT_DAYS,
+        current_days: Optional[float] = None,  # None = cálculo adaptativo
         delta_high: float = DELTA_HIGH,
         delta_moderate: float = DELTA_MODERATE,
         coverage_threshold: float = COVERAGE_THRESHOLD,
     ):
         self.db = db or DatabaseManager()
         self.n_topics = n_topics
-        self.historical_days = historical_days
-        self.current_days = current_days
+        self._forced_window = current_days  # None = adaptativo, float = forzado
+        self.current_days = current_days or FALLBACK_WINDOW_DAYS
         self.delta_high = delta_high
         self.delta_moderate = delta_moderate
         self.coverage_threshold = coverage_threshold
@@ -135,12 +158,231 @@ class TrendsAgent:
             )
             logger.info("BERTopic cargado.")
 
+    #  Ventana adaptativa
+
+    def _calculate_adaptive_window(self, texts: list[dict]) -> float:
+        """
+        Calcula la ventana de evaluación óptima basada en dos criterios:
+
+        W_eval = max(W_stat, W_lifecycle)
+
+        1. W_stat = N_min / λ  (estabilidad estadística)
+           N_min = z² × p(1-p) / δ²  donde p = COVERAGE_THRESHOLD, δ = p/2
+           Cochran (1977): tamaño muestral para proporciones binomiales.
+
+        2. W_lifecycle = α × T_½  (ciclo de vida empírico)
+           T_½ = mediana de vida media de tópicos con buen ajuste exponencial.
+           Leskovec et al. (2009): decaimiento exponencial de cascadas.
+
+        Returns:
+            Ventana óptima en días (float).
+        """
+        timestamps = [t["created_utc"] for t in texts if t["created_utc"]]
+        if not timestamps:
+            return FALLBACK_WINDOW_DAYS
+
+        max_ts = max(timestamps)
+        min_ts = min(timestamps)
+        total_days = (max_ts - min_ts) / 86400
+        n_docs = len(timestamps)
+
+        if total_days <= 0:
+            return FALLBACK_WINDOW_DAYS
+
+        # λ = tasa de documentos por día
+        lam = n_docs / total_days
+
+        # W_stat: ventana mínima para estabilidad estadística
+        # N_min = z² × p(1-p) / δ²  con p = coverage_threshold, δ = p/2
+        p = self.coverage_threshold
+        delta_margin = p / 2
+        n_min = (CONFIDENCE_Z ** 2 * p * (1 - p)) / (delta_margin ** 2)
+        w_stat_days = n_min / lam
+
+        logger.info(
+            f"[Ventana adaptativa] W_stat: N_min={n_min:.0f} textos, "
+            f"λ={lam:.0f} docs/día → W_stat={w_stat_days:.2f} días "
+            f"({w_stat_days * 24:.1f} horas)"
+        )
+
+        # W_lifecycle: basado en vida media empírica de tópicos
+        half_life_hours = self._estimate_corpus_half_life(texts)
+
+        if half_life_hours is not None:
+            w_life_days = (LIFECYCLE_ALPHA * half_life_hours) / 24
+            logger.info(
+                f"[Ventana adaptativa] W_lifecycle: T_½={half_life_hours:.1f}h, "
+                f"α={LIFECYCLE_ALPHA} → W_lifecycle={w_life_days:.2f} días "
+                f"({w_life_days * 24:.1f} horas)"
+            )
+        else:
+            w_life_days = FALLBACK_WINDOW_DAYS
+            logger.info(
+                f"[Ventana adaptativa] No se pudo calcular T_½, "
+                f"usando fallback W_lifecycle={FALLBACK_WINDOW_DAYS} días"
+            )
+
+        # W_eval = max(W_stat, W_lifecycle), acotado por [MIN, MAX]
+        w_eval = max(w_stat_days, w_life_days)
+        w_eval = max(w_eval, MIN_WINDOW_HOURS / 24)
+        w_eval = min(w_eval, MAX_WINDOW_DAYS)
+
+        logger.info(
+            f"[Ventana adaptativa] W_eval = max({w_stat_days:.2f}, {w_life_days:.2f}) "
+            f"= {w_eval:.2f} días ({w_eval * 24:.1f} horas)"
+        )
+
+        return round(w_eval, 2)
+
+    def _estimate_corpus_half_life(self, texts: list[dict]) -> Optional[float]:
+        """
+        Estima la vida media (T_½) mediana de los tópicos del corpus.
+
+        Usa un modelo BERTopic rápido (solo para medir T_½, no el modelo final)
+        o datos históricos de topic_assignments si existen.
+
+        Método: para cada tópico con pico ≥ MIN_PEAK_TEXTS, ajusta
+        f(t) = e^(-λt) a la curva post-pico. T_½ = ln(2)/λ.
+
+        Returns:
+            Mediana de T_½ en horas, o None si no hay suficientes datos.
+        """
+        # Intentar usar topic_assignments existentes en la BD
+        try:
+            import sqlite3
+            db_path = self.db.db_path if hasattr(self.db, 'db_path') else None
+            if db_path:
+                conn = sqlite3.connect(db_path)
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM topic_assignments WHERE topic_id != -1")
+                n_assignments = cur.fetchone()[0]
+
+                if n_assignments > 1000:
+                    return self._half_life_from_db(conn)
+                conn.close()
+        except Exception as e:
+            logger.debug(f"No se pudieron usar topic_assignments existentes: {e}")
+
+        # Fallback: calcular desde los timestamps del corpus sin tópicos
+        return self._half_life_from_timestamps(texts)
+
+    def _half_life_from_db(self, conn) -> Optional[float]:
+        """Calcula T_½ desde topic_assignments existentes en la BD."""
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT topic_id, created_utc
+            FROM topic_assignments
+            WHERE topic_id != -1
+        """)
+
+        topic_days: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for topic_id, created_utc in cur.fetchall():
+            day = datetime.fromtimestamp(created_utc, tz=timezone.utc).strftime("%Y-%m-%d")
+            topic_days[topic_id][day] += 1
+        conn.close()
+
+        half_lives = []
+        for tid, daily in topic_days.items():
+            hl = self._fit_half_life(daily)
+            if hl is not None:
+                half_lives.append(hl)
+
+        if len(half_lives) < 5:
+            logger.info(f"[Half-life] Solo {len(half_lives)} tópicos con ajuste válido, insuficiente.")
+            return None
+
+        median_hl = float(np.median(half_lives))
+        logger.info(
+            f"[Half-life] {len(half_lives)} tópicos analizados desde BD. "
+            f"Mediana T_½ = {median_hl:.1f}h (P25={np.percentile(half_lives, 25):.1f}h, "
+            f"P75={np.percentile(half_lives, 75):.1f}h)"
+        )
+        return median_hl
+
+    def _half_life_from_timestamps(self, texts: list[dict]) -> Optional[float]:
+        """
+        Estimación gruesa de T_½ sin tópicos: usa la autocorrelación
+        temporal del volumen de discusión. Menos preciso pero funciona
+        como fallback cuando no hay topic_assignments.
+        """
+        day_counts: dict[str, int] = defaultdict(int)
+        for t in texts:
+            if t.get("created_utc"):
+                day = datetime.fromtimestamp(t["created_utc"], tz=timezone.utc).strftime("%Y-%m-%d")
+                day_counts[day] += 1
+
+        if len(day_counts) < 7:
+            return None
+
+        sorted_days = sorted(day_counts.items())
+        counts = np.array([c for _, c in sorted_days], dtype=float)
+
+        # Autocorrelación normalizada — el lag donde cae a 0.5 es ~T_½
+        mean_c = np.mean(counts)
+        var_c = np.var(counts)
+        if var_c == 0:
+            return None
+
+        max_lag = min(len(counts) // 2, 14)
+        for lag in range(1, max_lag):
+            autocorr = np.mean((counts[:-lag] - mean_c) * (counts[lag:] - mean_c)) / var_c
+            if autocorr < 0.5:
+                half_life_hours = lag * 24  # cada lag = 1 día
+                logger.info(f"[Half-life fallback] Autocorrelación < 0.5 en lag={lag} días → T_½ ≈ {half_life_hours}h")
+                return half_life_hours
+
+        return None
+
+    def _fit_half_life(self, daily_counts: dict[str, int]) -> Optional[float]:
+        """
+        Ajusta decaimiento exponencial f(t) = e^(-λt) a la curva post-pico
+        de un tópico. Retorna T_½ = ln(2)/λ en horas si R² > 0.5.
+        """
+        sorted_days = sorted(daily_counts.items())
+        counts = np.array([c for _, c in sorted_days])
+
+        peak_idx = np.argmax(counts)
+        peak_count = counts[peak_idx]
+
+        if peak_count < MIN_PEAK_TEXTS:
+            return None
+
+        post_peak = counts[peak_idx:]
+        if len(post_peak) < 3:
+            return None
+
+        normalized = post_peak / peak_count
+        x = np.arange(len(normalized))
+
+        try:
+            def exp_decay(t, lam):
+                return np.exp(-lam * t)
+
+            popt, _ = curve_fit(exp_decay, x, normalized, p0=[0.5], maxfev=5000)
+            lam = popt[0]
+            if lam <= 0:
+                return None
+
+            predicted = exp_decay(x, lam)
+            ss_res = np.sum((normalized - predicted) ** 2)
+            ss_tot = np.sum((normalized - np.mean(normalized)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+
+            if r_squared < 0.5:
+                return None
+
+            return (np.log(2) / lam) * 24  # días → horas
+        except (RuntimeError, ValueError):
+            return None
+
     #  ReAct: Observación
     def _observe(self, limit: int) -> tuple[list[dict], list[dict]]:
         """
-        Carga textos y aplica el split temporal:
-          - Histórico (días 1-60): para BERTopic.fit() y baseline Δ
-          - Evaluación (días 61-90): para BERTopic.transform() y cálculo de tendencia
+        Carga textos, calcula la ventana adaptativa, y aplica el split temporal.
+
+        La ventana de evaluación se determina como:
+          W_eval = max(W_stat, W_lifecycle)
+        a menos que el usuario haya forzado un valor en el constructor.
 
         Returns:
             (historical_texts, current_texts)
@@ -155,6 +397,13 @@ class TrendsAgent:
         self._max_ts = max(timestamps)
         self._min_ts = min(timestamps)
 
+        # Calcular ventana adaptativa (o usar la forzada)
+        if self._forced_window is not None:
+            self.current_days = self._forced_window
+            logger.info(f"[Observación] Ventana forzada por usuario: {self.current_days} días")
+        else:
+            self.current_days = self._calculate_adaptive_window(texts)
+
         # Split: ventana actual = últimos current_days desde el máximo
         self._current_cutoff = self._max_ts - (self.current_days * 86400)
 
@@ -164,11 +413,14 @@ class TrendsAgent:
         max_date = datetime.fromtimestamp(self._max_ts, tz=timezone.utc).date()
         min_date = datetime.fromtimestamp(self._min_ts, tz=timezone.utc).date()
         cutoff_date = datetime.fromtimestamp(self._current_cutoff, tz=timezone.utc).date()
+        total_days = (self._max_ts - self._min_ts) / 86400
 
         logger.info(
-            f"[Observación] Split temporal — "
-            f"Histórico: {min_date} → {cutoff_date} ({len(historical)} textos, ~días 1-{self.historical_days}) | "
-            f"Evaluación: {cutoff_date} → {max_date} ({len(current)} textos, ~días 61-90)"
+            f"[Observación] Split temporal (ventana={self.current_days:.2f} días) — "
+            f"Histórico: {min_date} → {cutoff_date} ({len(historical)} textos, "
+            f"~{total_days - self.current_days:.0f} días) | "
+            f"Evaluación: {cutoff_date} → {max_date} ({len(current)} textos, "
+            f"~{self.current_days:.1f} días)"
         )
 
         if len(historical) < 100:
@@ -242,8 +494,6 @@ class TrendsAgent:
         Returns:
             {topic_id: {daily_weights, current_weight, historical_mean, ...}}
         """
-        from collections import defaultdict
-
         # Pesos diarios en ventana histórica
         hist_day_topics: dict[str, list[int]] = defaultdict(list)
         for t, tid in zip(historical_texts, hist_topic_ids):
@@ -289,16 +539,6 @@ class TrendsAgent:
             n_historical = sum(1 for t in hist_topic_ids if t == tid)
             corpus_coverage = (n_current + n_historical) / total_texts
 
-            # Días consecutivos creciendo en ventana de evaluación
-            sorted_curr = sorted(curr_daily.items())
-            consecutive_growth = 0
-            if len(sorted_curr) >= 2:
-                for i in range(1, len(sorted_curr)):
-                    if sorted_curr[i][1] > sorted_curr[i - 1][1]:
-                        consecutive_growth += 1
-                    else:
-                        consecutive_growth = 0
-
             # daily_weights combina ambas ventanas para visualización
             daily_weights = {**hist_daily, **curr_daily}
 
@@ -312,7 +552,6 @@ class TrendsAgent:
                 "n_current": n_current,
                 "n_historical": n_historical,
                 "corpus_coverage": corpus_coverage,
-                "consecutive_growth_days": consecutive_growth,
             }
 
             logger.debug(
@@ -328,7 +567,6 @@ class TrendsAgent:
     def _act(self, topic_id: int, stats: dict, ) -> tuple[str, str]:
         delta = stats["delta"]
         coverage = stats["corpus_coverage"]
-        consec = stats["consecutive_growth_days"]
         n_current = stats["n_current"]
         curr_w = stats["current_weight"]
         hist_mean = stats["historical_mean"]
@@ -348,23 +586,17 @@ class TrendsAgent:
                     f"Spike localizado, marcado para monitoreo."
                 )
         elif delta >= self.delta_moderate:
-            if consec >= 3:
-                decision = "moderate_trend"
-                reason = (
-                    f"Δ={delta:.2f} en zona moderada [{self.delta_moderate},{self.delta_high}) "
-                    f"y crecimiento {consec} días consecutivos."
-                )
-            elif curr_w < hist_mean:
+            if curr_w < hist_mean:
                 decision = "discarded"
                 reason = (
                     f"Δ={delta:.2f} en zona moderada pero tópico decreciente "
                     f"(peso actual {curr_w:.4f} < media {hist_mean:.4f}). Pico pasajero."
                 )
             else:
-                decision = "discarded"
+                decision = "moderate_trend"
                 reason = (
-                    f"Δ={delta:.2f} en zona moderada pero sin {3} días consecutivos de crecimiento "
-                    f"({consec} días)."
+                    f"Δ={delta:.2f} en zona moderada [{self.delta_moderate},{self.delta_high}) "
+                    f"con peso actual {curr_w:.4f} > media histórica {hist_mean:.4f}."
                 )
         else:
             decision = "discarded"
@@ -457,7 +689,6 @@ class TrendsAgent:
                 "n_current_texts": s["n_current"],
                 "n_historical_texts": s["n_historical"],
                 "corpus_coverage": s["corpus_coverage"],
-                "consecutive_growth_days": s["consecutive_growth_days"],
                 "trend_decision": decision,
                 "trend_reason": reason,
                 "daily_weights_json": json.dumps(s["daily_weights"]),
@@ -551,12 +782,14 @@ class TrendsAgent:
             "n_assignments_saved": n_assigned,
             "trend_decisions": decision_counts,
             "trending_topics_count": len(trending),
+            "evaluation_window_days": self.current_days,
             "top_topics_by_delta": top_trends,
         }
 
         logger.info("=" * 60)
         logger.info("RESUMEN AGENTE DE TENDENCIAS")
         logger.info(f"  Run ID          : {self.model_run_id}")
+        logger.info(f"  Ventana eval    : {self.current_days:.2f} días ({self.current_days * 24:.1f} horas)")
         logger.info(f"  Textos procesados: {total}")
         logger.info(f"  Tópicos detectados: {n_topics} (+ {n_outliers} outliers)")
         logger.info(f"  Decisiones      : {decision_counts}")

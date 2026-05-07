@@ -10,10 +10,14 @@
 6. [Módulo de Preprocesamiento](#6-modulo-de-preprocesamiento)
 7. [Agente de Sentimiento](#7-agente-de-sentimiento)
 8. [Agente de Tendencias](#8-agente-de-tendencias)
-9. [Evaluación del Protocolo Experimental](#9-evaluacion)
-10. [Scripts de Ejecución](#10-scripts-de-ejecucion)
-11. [Flujo Completo de Datos](#11-flujo-completo)
-12. [Parámetros Configurables](#12-parametros-configurables)
+9. [Agente de Validación](#9-agente-de-validacion)
+10. [Orquestador LangGraph](#10-orquestador-langgraph)
+11. [Pipeline Tradicional (Baseline)](#11-pipeline-tradicional)
+12. [Evaluación del Protocolo Experimental](#12-evaluacion)
+13. [Interfaz Streamlit](#13-interfaz-streamlit)
+14. [Scripts de Ejecución](#14-scripts-de-ejecucion)
+15. [Flujo Completo de Datos](#15-flujo-completo)
+16. [Parámetros Configurables](#16-parametros-configurables)
 
 ---
 
@@ -28,11 +32,13 @@ Este proyecto implementa una **arquitectura agentic** para el análisis de senti
 | Recolección histórica | Arctic Shift API — 90 días de datos históricos uniformes | ✅ |
 | Recolección en tiempo real | PRAW — posts más recientes | ✅ |
 | Preprocesamiento | Limpieza y normalización para RoBERTa y BERTopic | ✅ |
-| Agente de Sentimiento | RoBERTa + VADER con patrón ReAct | ✅ |
+| Agente de Sentimiento | RoBERTa + Gemini LLM con patrón ReAct | ✅ |
 | Agente de Tendencias | BERTopic + cálculo de Δ temporal | ✅ |
-| Evaluación experimental | c_v, UMass, Jaccard, latencia comparativa | ✅ |
-| Agente de Validación | Síntesis de sentimiento + tendencias | 🔄 Pendiente |
-| Orquestador LangGraph | Coordinación del pipeline completo | 🔄 Pendiente |
+| Agente de Validación | Alertas + contexto LLM | ✅ |
+| Orquestador LangGraph | Coordinación con decisiones condicionales | ✅ |
+| Pipeline Tradicional | Baseline de comparación (RoBERTa directo) | ✅ |
+| Evaluación experimental | c_v, UMass, Jaccard, baselines, ablación | ✅ |
+| Interfaz Streamlit | Reportes, métricas, explorador de datos | ✅ |
 
 ---
 
@@ -65,6 +71,12 @@ agentic-reddit-political-analysis/
 │   ├── run_evaluation.py            # Protocolo experimental completo
 │   ├── label_ground_truth.py        # Etiquetado automático con DeepSeek V3
 │   ├── evaluate_ground_truth.py     # Evaluación de métricas contra ground truth
+│   ├── run_orchestrator.py           # Ejecución del orquestador LangGraph
+│   ├── run_pipeline.py              # Ejecución del pipeline tradicional (baseline)
+│   ├── run_validation.py            # Ejecución del agente de validación
+│   ├── reclassify_with_gemini.py    # Re-clasificación masiva con Gemini (one-shot)
+│   ├── window_analysis.py           # Análisis de half-life y ventana adaptativa
+│   ├── export_manual_sample.py      # Exportar muestra para etiquetado manual
 │   ├── inspect_sentiment.py         # Inspección visual: texto + clasificación
 │   ├── inspect_trends.py            # Inspección visual: tópicos + textos
 │   ├── inspect_ground_truth.py      # Comparación ground truth vs RoBERTa
@@ -81,11 +93,19 @@ agentic-reddit-political-analysis/
 │   ├── preprocessing/
 │   │   ├── text_cleaner.py       # Limpieza de texto con regex
 │   │   └── preprocessor.py       # Pipeline de preprocesamiento
+│   ├── orchestrator/
+│   │   └── orchestrator.py       # Orquestador LangGraph StateGraph
+│   ├── pipeline/
+│   │   └── traditional_pipeline.py  # Pipeline tradicional (baseline)
+│   ├── reporting/
+│   │   └── report_generator.py   # Generador de gráficos y reportes .md
 │   └── agents/
 │       ├── sentiment/
-│       │   └── sentiment_agent.py  # Agente ReAct de sentimiento
-│       └── trends/
-│           └── trends_agent.py     # Agente ReAct de tendencias
+│       │   └── sentiment_agent.py  # Agente ReAct de sentimiento (RoBERTa + Gemini)
+│       ├── trends/
+│       │   └── trends_agent.py     # Agente ReAct de tendencias
+│       └── validation/
+│           └── validation_agent.py # Agente de validación (alertas + LLM)
 ```
 
 ---
@@ -195,11 +215,10 @@ Resultados del Agente de Sentimiento con trazabilidad completa de cada decisión
 | `subreddit` | TEXT | Nombre del subreddit |
 | `roberta_label` | TEXT | Predicción de RoBERTa: `positive/negative/neutral` |
 | `roberta_confidence` | REAL | Confianza de RoBERTa (0.0 a 1.0) |
-| `decision` | TEXT | Decisión ReAct: `accepted/cross_validated/ambiguous` |
+| `decision` | TEXT | Decisión ReAct: `accepted/cross_validated/rescued/ambiguous` |
 | `final_label` | TEXT | Etiqueta final: `positive/negative/neutral/ambiguous` |
-| `final_confidence` | REAL | Confianza final (puede tener boost de VADER) |
-| `vader_compound` | REAL | Score VADER (-1 a 1), solo en `cross_validated` |
-| `vader_label` | TEXT | Etiqueta VADER, solo en `cross_validated` |
+| `final_confidence` | REAL | Confianza final (puede tener boost si hay acuerdo) |
+| `gemini_label` | TEXT | Etiqueta de Gemini LLM (solo si decision != 'accepted') |
 | `analyzed_at` | TEXT | Timestamp de análisis |
 
 #### `topic_assignments`
@@ -240,7 +259,6 @@ Resultados del análisis de tendencias por tópico, con la decisión ReAct y mé
 | `n_current_texts` | INTEGER | Textos en ventana actual con este tópico |
 | `n_historical_texts` | INTEGER | Textos históricos con este tópico |
 | `corpus_coverage` | REAL | % del corpus total cubierto por el tópico |
-| `consecutive_growth_days` | INTEGER | Días consecutivos creciendo |
 | `trend_decision` | TEXT | `emerging_trend/localized_spike/moderate_trend/discarded` |
 | `trend_reason` | TEXT | Razón textual de la decisión |
 | `daily_weights_json` | TEXT | JSON con pesos diarios `{"2026-02-15": 0.12, ...}` |
@@ -306,10 +324,6 @@ Itera por tres métodos de ordenamiento: `new` → `hot` → `top(month)`.
 - `top(month)`: Top 1000 del mes — cubre 30 días pero solo los más votados.
 
 Usa un `set()` para deduplicación en memoria. Para cada post llama a `_collect_comments()` y espera `RATE_LIMIT_SLEEP` segundos.
-
-#### `collect_historical(subreddit_name, days, max_comments_per_post)`
-
-**NOTA**: Este método usa búsqueda Lucene de Reddit (`timestamp:EPOCH1..EPOCH2`) que **ya no funciona** con la API actual de Reddit. Está mantenido en el código pero no se usa. Para recolección histórica usar `ArcticCollector`.
 
 ### 5.3 Recolector Arctic Shift
 
@@ -411,12 +425,13 @@ Implementa el patrón **ReAct** (Observación → Razonamiento → Acción → R
 
 ### Modelos utilizados
 - **RoBERTa**: `cardiffnlp/twitter-roberta-base-sentiment-latest` — modelo fine-tuneado en Twitter para sentimiento. F1-macro publicado = 0.79 en TweetEval.
-- **VADER**: `vaderSentiment` — léxico de sentimiento basado en reglas. Rápido pero falla con sarcasmo político.
+- **Gemini 2.5 Flash Lite**: LLM de Google usado como segundo validador. Entiende contexto político, sarcasmo e ironía mejor que modelos basados en léxico.
 
 ### Umbrales configurables
 ```python
 HIGH_CONF_THRESHOLD = 0.85   # Por encima: acepta directamente
-LOW_CONF_THRESHOLD  = 0.50   # Por debajo: marca como ambiguo
+LOW_CONF_THRESHOLD  = 0.50   # Por debajo: intenta rescatar con Gemini
+MID_CONF_THRESHOLD  = 0.65   # Desempate en zona media cuando hay desacuerdo
 ```
 
 ### Ciclo ReAct
@@ -430,25 +445,38 @@ Analiza el output de RoBERTa y decide:
 | Condición | Decisión |
 |-----------|----------|
 | `conf > 0.85` | `accepted` — RoBERTa es suficientemente seguro |
-| `0.50 < conf ≤ 0.85` | `cross_validated` — necesita validación con VADER |
-| `conf ≤ 0.50` | `ambiguous` — demasiada incertidumbre |
+| `0.50 < conf ≤ 0.85` | `needs_cross_validation` — necesita validación con Gemini |
+| `conf ≤ 0.50` | `needs_rescue` — Gemini intenta rescatar |
 
-#### `_act(text, decision, roberta_label, roberta_confidence)` — Acción
-Ejecuta la acción según la decisión:
+#### `_act_with_gemini(roberta_label, roberta_confidence, gemini_label)` — Acción
+Combina los resultados de RoBERTa y Gemini con lógica escalonada:
 
-- **`accepted`**: Usa directamente el resultado de RoBERTa.
-- **`cross_validated`**: Llama a VADER y compara:
-  - Si coinciden con RoBERTa → boost de confianza: `final_confidence = min(conf + 0.05, 1.0)`
-  - Si discrepan → **RoBERTa gana** (mejor comprensión de contexto político). VADER queda registrado como evidencia.
-- **`ambiguous`**: `final_label = "ambiguous"`, se excluye del análisis agregado.
+**Zona media (conf 0.50 - 0.85):**
+- Acuerdo RoBERTa = Gemini → `cross_validated` con boost de confianza (+0.05)
+- Desacuerdo, conf > 0.65 → RoBERTa gana (tiene confianza razonable)
+- Desacuerdo, conf ≤ 0.65 → Gemini gana (salvo labels opuestos → `ambiguous`)
 
-**Decisión de diseño clave**: VADER no tiene poder de veto. Solo puede aumentar la confianza cuando coincide. Esto redujo la tasa de ambiguos del 38.2% inicial al 3.2%.
+**Zona baja (conf ≤ 0.50):**
+- Acuerdo → `rescued` con boost de confianza
+- Gemini dice "ambiguous" → `ambiguous`
+- Labels opuestos (positive vs negative) → `ambiguous`
+- Gemini da label claro → `rescued` (usa label de Gemini)
+
+#### Prompt de Gemini
+El prompt fue calibrado iterativamente con 20 textos de prueba (10 cross_validated + 10 ambiguos), logrando 90% de accuracy. Guías clave:
+- Detección de sarcasmo sutil ("You mean..." = negativo)
+- "Hoping for X" / "probably better" = neutral, no positivo
+- Calls to action = neutral salvo con insultos
+- En duda entre negativo y neutral → neutral
+
+#### `_classify_with_gemini(texts)` — Clasificación en lote
+Envía hasta 20 textos por llamada API. Parsea JSON con fallback regex. Retry automático con backoff exponencial (3 intentos).
 
 #### `_record(results)` — Registro
 Inserta en `sentiment_results` via `INSERT OR IGNORE` (idempotente).
 
 #### `run(limit=1000, batch_size=64)` → `dict`
-Ejecuta el ciclo completo. Procesa en lotes de 64 textos para eficiencia con RoBERTa. Retorna métricas del ciclo.
+Ejecuta el ciclo en dos pasos: (1) RoBERTa en lotes de 64, (2) Gemini en lotes de 20 solo para textos que lo necesitan (~70% del total). Retorna métricas del ciclo.
 
 ---
 
@@ -480,11 +508,36 @@ DELTA_MODERATE     = 1.0    # Umbral para tendencia moderada
 COVERAGE_THRESHOLD = 0.05   # 5% del corpus = emergente vs localizado
 STD_FLOOR          = 0.005  # Piso mínimo de σ
 MIN_TOPIC_TEXTS    = 10     # Mínimo textos en ventana actual
-HISTORICAL_DAYS    = 60     # Días de ventana histórica
-CURRENT_DAYS       = 7      # Días de ventana de evaluación
+
+# Ventana adaptativa
+CONFIDENCE_Z       = 1.96   # z para IC 95%
+LIFECYCLE_ALPHA    = 2      # Multiplicador de vida media (α=2 → captura ~75% del ciclo)
+FALLBACK_WINDOW_DAYS = 2    # Fallback si no se puede calcular half-life
+MIN_WINDOW_HOURS   = 6      # Mínimo absoluto de ventana
+MAX_WINDOW_DAYS    = 7      # Máximo absoluto de ventana
+MIN_PEAK_TEXTS     = 20     # Mínimo de textos en pico para half-life
 ```
 
 **Nota sobre thresholds**: Los valores 1.5/1.0 están calibrados para el corpus real de 90 días donde max Δ observado es 1.58 (tópico `oil_oil companies`, run `db7e2622`).
+
+### Ventana adaptativa
+
+La ventana de evaluación no es fija — se calcula automáticamente como:
+
+```
+W_eval = max(W_stat, W_lifecycle)
+```
+
+**W_stat = N_min / λ** — Garantiza estabilidad estadística. N_min se deriva del Teorema Central del Límite para proporciones binomiales (Cochran, 1977): `N_min = z² × p(1-p) / δ²` donde `p = COVERAGE_THRESHOLD`, `δ = p/2`. Con p=5%: N_min ≈ 292 textos.
+
+**W_lifecycle = α × T_½** — Garantiza capturar el ciclo de vida del tópico. T_½ es la vida media empírica, medida ajustando decaimiento exponencial `f(t) = e^(-λt)` a la curva post-pico de cada tópico (Leskovec et al., 2009). α=2 captura ~75% del ciclo.
+
+Con corpus denso (alto λ), W_lifecycle domina → ventana corta. Con corpus escaso (bajo λ), W_stat domina → ventana más larga.
+
+**Resultado empírico** (corpus de 202K textos, 90 días):
+- λ = 2,251 docs/día → W_stat = 0.13 días (3h)
+- T_½ mediana = 18.9h → W_lifecycle = 1.57 días (37.8h)
+- **W_eval = 1.57 días** (el constraint de ciclo de vida domina)
 
 ### Stopwords de Reddit
 Se añade una lista `REDDIT_STOPWORDS` al `CountVectorizer` de BERTopic para filtrar meta-conversación:
@@ -501,7 +554,7 @@ Sin esta lista, BERTopic genera tópicos de meta-conversación (ej: `response_sa
 ### Ciclo ReAct
 
 #### `_observe(limit)` — Observación
-Carga textos con timestamps. Retorna `(historical_texts, current_texts)` separados por el cutoff `max_ts - CURRENT_DAYS`.
+Carga textos con timestamps. Calcula la ventana adaptativa (o usa la forzada) y retorna `(historical_texts, current_texts)` separados por el cutoff `max_ts - W_eval`.
 
 #### `_reason(historical_texts, current_texts)` — Razonamiento
 1. Combina históricos + actuales en `all_texts`
@@ -517,8 +570,8 @@ Aplica la lógica de decisión:
 |-----------|----------|
 | Δ ≥ 1.5 y coverage > 5% | `emerging_trend` — tendencia emergente |
 | Δ ≥ 1.5 y coverage ≤ 5% | `localized_spike` — spike localizado, monitorear |
-| 1.0 ≤ Δ < 1.5 y 3+ días creciendo | `moderate_trend` — tendencia moderada |
-| 1.0 ≤ Δ < 1.5 y decreciendo | `discarded` — pico pasajero |
+| 1.0 ≤ Δ < 1.5 y peso actual > media | `moderate_trend` — tendencia moderada |
+| 1.0 ≤ Δ < 1.5 y peso actual ≤ media | `discarded` — pico pasajero |
 | Δ < 1.0 | `discarded` — no es tendencia |
 
 #### `_record(...)` — Registro
@@ -529,7 +582,78 @@ Ejecuta el ciclo completo. Retorna métricas incluyendo top 15 tópicos por Δ.
 
 ---
 
-## 9. Evaluación del Protocolo Experimental
+## 9. Agente de Validación
+
+**Archivo**: `src/agents/validation/validation_agent.py`
+
+Sintetiza los resultados de sentimiento y tendencias para generar un reporte final con alertas y contexto político.
+
+### Funcionalidades
+
+1. **Sistema de alertas**: Clasifica tendencias en alertas críticas (Δ ≥ 3.0 y negatividad ≥ 70%) o informativas (Δ ≥ 2.0).
+2. **Contexto político (LLM)**: Usa Gemini Flash para generar un resumen ejecutivo y contexto político por cada tendencia, basándose en textos representativos del tópico.
+3. **Generación de reportes**: Produce un reporte .md con gráficos (distribución de sentimiento, confianza, Δ por tópico, word clouds).
+
+### Umbrales configurables
+```python
+ALERT_CRITICAL_DELTA   = 3.0    # Δ mínimo para alerta crítica
+ALERT_CRITICAL_NEG_PCT = 0.70   # Negatividad mínima para alerta crítica
+ALERT_INFORMATIVE_DELTA = 2.0   # Δ mínimo para alerta informativa
+```
+
+---
+
+## 10. Orquestador LangGraph
+
+**Archivo**: `src/orchestrator/orchestrator.py`
+
+Define un `StateGraph` de LangGraph que coordina la ejecución de todos los agentes con **decisiones condicionales**:
+
+### Flujo del grafo
+```
+preprocess → sentiment → trends → [validation | no_trends_report] → finalize
+```
+
+### Decisiones condicionales (valor agentic)
+
+| Nodo | Decisión | Alternativa |
+|------|----------|-------------|
+| `should_run_sentiment` | ¿Hay textos pendientes? | Sí → sentiment, No → trends |
+| `should_run_trends` | ¿Hay resultados de sentimiento? | Sí → trends, No → finalize |
+| `should_run_validation` | ¿Hay tendencias relevantes? | Sí → validation, No → no_trends_report |
+
+La decisión más importante es `should_run_validation`: si el agente de tendencias descartó **todos** los tópicos, el orquestador genera un reporte de ausencia y no invoca al agente de validación (ahorrando recursos y evitando reportes con ruido).
+
+### Estado compartido
+```python
+class OrchestratorState(TypedDict, total=False):
+    run_id: str
+    db_path: str
+    preprocess_result: dict
+    sentiment_result: dict
+    trends_result: dict
+    validation_result: dict
+    steps_completed: list[str]
+```
+
+Cada decisión y resultado se persiste en la BD (`orchestration_runs`), permitiendo auditar el camino tomado.
+
+---
+
+## 11. Pipeline Tradicional (Baseline)
+
+**Archivo**: `src/pipeline/traditional_pipeline.py`
+
+Implementa un pipeline secuencial sin decisiones agentic para comparación:
+- Clasifica con RoBERTa argmax directo (sin umbrales, sin Gemini, sin abstención)
+- Ejecuta BERTopic sin filtrado por Δ
+- Reporta todos los tópicos sin evaluar relevancia estadística
+
+Sirve como baseline para demostrar el valor del enfoque agentic.
+
+---
+
+## 12. Evaluación del Protocolo Experimental
 
 **Archivo**: `scripts/run_evaluation.py`
 
@@ -539,7 +663,7 @@ Implementa todas las métricas del protocolo experimental requeridas. Cada secci
 
 1. **Distribución de confianza**: Histograma de `roberta_confidence` en 3 rangos (alta/media/baja)
 2. **Tasa de ambigüedad**: % de textos con `decision = 'ambiguous'` (objetivo: < 10%)
-3. **Acuerdo inter-modelo RoBERTa vs VADER**: De los textos `cross_validated`, qué % coincidieron ambos modelos. Un acuerdo > 70% valida la consistencia de RoBERTa sin necesidad de ground truth.
+3. **Acuerdo inter-modelo RoBERTa vs Gemini**: De los textos `cross_validated` y `rescued`, qué % coincidieron ambos modelos.
 
 ### `--topics` — Coherencia temática
 
@@ -549,23 +673,35 @@ Calcula **c_v** y **UMass** usando gensim sobre los tópicos del último run de 
 
 **Nota técnica UMass**: Las palabras clave de BERTopic se filtran para incluir solo aquellas presentes en el diccionario gensim antes de calcular UMass. Sin este filtro, palabras ausentes del corpus generan `log(0/0) = nan`.
 
-### Resultados del protocolo experimental (run Marzo 2026, 201,568 textos)
+### Resultados del protocolo experimental (run Abril 2026, 203,275 textos)
 
 **Sentimiento:**
-- negative: 69.3%, neutral: 21.9%, positive: 3.8%, ambiguous: 5.0%
-- Confianza promedio: 0.742; confianza alta (>0.85): 30.2%
-- Tasa de ambigüedad: 4.98% ✅ (objetivo < 10%)
-- Acuerdo inter-modelo RoBERTa-VADER: 42.9% (zona genuinamente ambigua)
+- negative: 69.4%, neutral: 26.4%, positive: 3.2%, ambiguous: 1.0%
+- Confianza promedio: 0.7627; confianza mediana: 0.7958; confianza alta (>0.85): 30.2%
+- Tasa de ambigüedad: 0.98% ✅ (objetivo < 10%)
+- Cross-validación con Gemini 2.5 Flash Lite para zona de incertidumbre
+- Decisiones: accepted 30.2%, cross_validated 64.2%, rescued 4.6%, ambiguous 1.0%
 
-**Tópicos (run `db7e2622`, 365 tópicos):**
+**Ground truth (DeepSeek V3 pseudo-labels, validación manual κ=0.9651):**
+- Accuracy agentic: 0.7510
+- F1-macro: 0.599
+- Δ accuracy (agentic - pipeline): +0.08
+
+**Tópicos (379 tópicos, ventana adaptativa W=1.57 días):**
 - c_v = 0.776 ✅ (objetivo > 0.55)
 - Jaccard stability (3 runs) = 0.731 ✅ (objetivo > 0.70)
-- Top tópico: `oil_oil companies` Δ=1.58 (localized_spike)
+- Tendencias relevantes: 7 de 379 tópicos (0 alertas críticas, 2 informativas)
+- Top tópico por Δ: `125_fetterman_john fetterman_lamb_stroke` Δ=6.44 (localized_spike, INFORMATIVE)
 
-> **Nota UMass**: El score bajo es esperado en corpora de redes sociales. UMass fue calibrado sobre textos formales (Wikipedia, noticias); en Reddit el léxico es más diverso y los términos no co-ocurren tan densamente. c_v (que usa co-ocurrencia en ventana deslizante) es más robusto para este tipo de datos y el valor 0.77 es excelente.
+> **Nota UMass**: El score bajo es esperado en corpora de redes sociales. UMass fue calibrado sobre textos formales (Wikipedia, noticias); en Reddit el léxico es más diverso y los términos no co-ocurren tan densamente. c_v (que usa co-ocurrencia en ventana deslizante) es más robusto para este tipo de datos y el valor 0.776 es excelente.
 
 **Estabilidad (Jaccard 3 runs, 5000 textos):**
 - **Jaccard promedio: 0.731 ✅** (objetivo > 0.70)
+
+**Ventana adaptativa:**
+- λ = 2,251 docs/día → W_stat = 0.13 días (3h)
+- T_½ mediana = 18.9h → W_lifecycle = 1.57 días (37.8h)
+- **W_eval = 1.57 días** (el constraint de ciclo de vida domina)
 
 ### `--stability` — Estabilidad de clustering
 
@@ -594,8 +730,8 @@ Compara etiquetas manuales (CSV anotado por humano) contra las pseudo-etiquetas 
 ### `--compare` — Comparación agentic vs pipeline tradicional
 
 Compara ambos enfoques sobre el mismo ground truth:
-- **Pipeline**: `roberta_label` directo sobre todos los textos (sin umbrales, sin VADER)
-- **Agentic**: `final_label` con mecanismo de tres caminos (accepted/cross_validated/ambiguous)
+- **Pipeline**: `roberta_label` directo sobre todos los textos (sin umbrales, sin Gemini)
+- **Agentic**: `final_label` con mecanismo de cuatro caminos (accepted/cross_validated/rescued/ambiguous)
 
 Reporta accuracy y F1 macro de ambos, y analiza la **ganancia por abstención informada**: evalúa qué accuracy obtiene el pipeline sobre los textos que el agente clasifica como `ambiguous`, demostrando que forzar una etiqueta en esos casos introduce error cercano al azar.
 
@@ -615,7 +751,7 @@ Análisis cualitativo y cuantitativo de **por qué** falla el sistema, no solo c
 3. **FM3 — Errores por rango de confianza**: Desglose de tasa de error por banda de confianza (alta/media-alta/media-baja)
 4. **FM4 — Errores por longitud de texto**: Relación entre longitud del texto y probabilidad de clasificación incorrecta
 5. **FM5 — Sarcasmo e ironía**: Detección de indicadores de sarcasmo (`/s`, `lol`, comillas irónicas, adverbios irónicos, puntuación enfática) y su prevalencia relativa en errores vs aciertos (ratio)
-6. **FM6 — Comportamiento de VADER en errores cross_validated**: Cuántas veces VADER habría dado la respuesta correcta pero el agente priorizó RoBERTa
+6. **FM6 — Comportamiento de Gemini en errores cross_validated/rescued**: Cuántas veces Gemini habría dado la respuesta correcta
 7. **FM7 — Ejemplos representativos**: Textos concretos por cada tipo de confusión dominante, con confianza, decisión y razonamiento de DeepSeek
 8. **FM8 — Análisis de abstención**: Distribución real de los textos `ambiguous` y accuracy hipotética si se hubieran clasificado
 
@@ -627,14 +763,31 @@ python -m scripts.run_evaluation --failure-modes
 
 Mide y compara:
 1. **RoBERTa directo** — sin lógica agentic
-2. **Agente ReAct** — con razonamiento y validación VADER
+2. **Agente ReAct** — con razonamiento y validación Gemini
 3. **BERTopic directo** — sin agente de tendencias
 
 Reporta tiempo total y ms/texto para cada componente, y el overhead del agente ReAct respecto al pipeline directo.
 
 ---
 
-## 10. Scripts de Ejecución
+## 13. Interfaz Streamlit
+
+**Archivo**: `app.py`
+
+Interfaz web con 4 páginas para visualizar resultados:
+
+1. **Reporte**: Muestra el reporte más reciente generado por el agente de validación (resumen ejecutivo, alertas, tendencias con word clouds y contexto político).
+2. **Metricas Agentic vs Pipeline**: 9 secciones comparativas — accuracy, calibración por tier, predicción selectiva, errores evitados, filtrado de tendencias, interpretabilidad, ground truth, ejecución condicional.
+3. **Explorador de Datos**: Distribución de sentimiento, muestras de texto por decisión, tendencias detectadas, historial de ejecuciones del orquestador.
+4. **Arquitectura**: Diagrama del flujo del sistema y tabla de decisiones por componente.
+
+```bash
+streamlit run app.py
+```
+
+---
+
+## 14. Scripts de Ejecución
 
 ### Recolección
 
@@ -719,6 +872,49 @@ python -m scripts.inspect_trends --decision emerging_trend --n 10
 python -m scripts.inspect_trends --topic 5
 ```
 
+### Orquestador
+
+```bash
+# Ejecución completa del orquestador LangGraph
+python -m scripts.run_orchestrator
+```
+
+### Pipeline Tradicional (Baseline)
+
+```bash
+# Pipeline completo (sentimiento + tendencias)
+python -m scripts.run_pipeline
+
+# Solo sentimiento con límite
+python -m scripts.run_pipeline --limit-sentiment 5000
+
+# Solo tendencias
+python -m scripts.run_pipeline --trends-only
+
+# Ajustar ventana actual
+python -m scripts.run_pipeline --current-days 2
+```
+
+### Validación
+
+```bash
+# Ejecutar agente de validación sobre último run de tendencias
+python -m scripts.run_validation
+```
+
+### Utilidades
+
+```bash
+# Re-clasificar textos con Gemini (one-shot, ya ejecutado sobre 202K textos)
+python -m scripts.reclassify_with_gemini
+
+# Análisis de half-life y ventana adaptativa
+python -m scripts.window_analysis
+
+# Exportar muestra aleatoria para etiquetado manual
+python -m scripts.export_manual_sample
+```
+
 ### Evaluación experimental
 
 ```bash
@@ -756,7 +952,7 @@ python -m scripts.run_evaluation --latency --latency-sample 200
 
 ---
 
-## 11. Flujo Completo de Datos
+## 15. Flujo Completo de Datos
 
 ```
 ╔══════════════════════════════════════════════════════════╗
@@ -788,11 +984,12 @@ python -m scripts.run_evaluation --latency --latency-sample 200
 ║  SENTIMIENTO ║   ║                      ║
 ║              ║   ║  BERTopic detecta    ║
 ║  RoBERTa     ║   ║  tópicos             ║
-║  + VADER     ║   ║                      ║
+║  + Gemini    ║   ║                      ║
 ║  ReAct:      ║   ║  Δ = (curr - mean)   ║
 ║  accepted /  ║   ║      / effective_std ║
 ║  cross_val / ║   ║                      ║
-║  ambiguous   ║   ║  emerging_trend /    ║
+║  rescued /   ║   ║  emerging_trend /    ║
+║  ambiguous   ║   ║                      ║
 ║              ║   ║  localized_spike /   ║
 ║              ║   ║  moderate_trend /    ║
 ║              ║   ║  discarded           ║
@@ -805,12 +1002,17 @@ python -m scripts.run_evaluation --latency --latency-sample 200
        └──────────┬───────────┘
                   ▼
 ╔══════════════════════════════════════════════════════════╗
-║  EVALUACIÓN EXPERIMENTAL                                  ║
-║                                                          ║
-║  --sentiment: confianza, ambigüedad, acuerdo VADER       ║
-║  --topics:    c_v, UMass                                 ║
-║  --stability: Jaccard similarity entre 3 runs            ║
-║  --latency:   comparativa con/sin agente                 ║
+║  ORQUESTADOR LANGGRAPH                                    ║
+║  ¿Hay tendencias relevantes?                             ║
+║  SÍ → Agente de Validación (alertas + LLM + reporte)    ║
+║  NO → Reporte de ausencia (ahorra recursos)              ║
+╚══════════════════════════════════════════════════════════╝
+                  │
+                  ▼
+╔══════════════════════════════════════════════════════════╗
+║  AGENTE DE VALIDACIÓN                                     ║
+║  Alertas (critical/informative)                          ║
+║  Contexto político (Gemini Flash) + reporte final        ║
 ╚══════════════════════════════════════════════════════════╝
 ```
 
@@ -840,7 +1042,7 @@ pointed this out. This is going to hurt us badly
 
 ---
 
-## 12. Parámetros Configurables
+## 16. Parámetros Configurables
 
 | Parámetro | Dónde | Valor | Efecto |
 |-----------|-------|-------|--------|
@@ -851,12 +1053,19 @@ pointed this out. This is going to hurt us badly
 | `MIN_WORD_COUNT` | settings.py | 10 | Filtro de calidad mínimo |
 | `BERTOPIC_MIN_WORDS` | settings.py | 15 | BERTopic necesita más contexto |
 | `HIGH_CONF_THRESHOLD` | sentiment_agent.py | 0.85 | Umbral para aceptar directo |
-| `LOW_CONF_THRESHOLD` | sentiment_agent.py | 0.50 | Umbral para marcar ambiguo |
+| `LOW_CONF_THRESHOLD` | sentiment_agent.py | 0.50 | Umbral para rescate con Gemini |
+| `MID_CONF_THRESHOLD` | sentiment_agent.py | 0.65 | Desempate en zona media |
+| `GEMINI_MODEL` | sentiment_agent.py | gemini-2.5-flash-lite | Modelo LLM para cross-validación |
+| `GEMINI_BATCH_SIZE` | sentiment_agent.py | 20 | Textos por llamada API a Gemini |
+| `ALERT_CRITICAL_DELTA` | validation_agent.py | 3.0 | Δ mínimo para alerta crítica |
+| `ALERT_INFORMATIVE_DELTA` | validation_agent.py | 2.0 | Δ mínimo para alerta informativa |
 | `DELTA_HIGH` | trends_agent.py | 1.5 | Umbral Δ para tendencia/spike (calibrado corpus real) |
 | `DELTA_MODERATE` | trends_agent.py | 1.0 | Umbral Δ para tendencia moderada |
 | `COVERAGE_THRESHOLD` | trends_agent.py | 0.05 | 5% cobertura = emergente vs localizado |
 | `STD_FLOOR` | trends_agent.py | 0.005 | Piso mínimo de σ para estabilidad numérica |
-| `HISTORICAL_DAYS` | trends_agent.py | 60 | Días de ventana histórica para baseline |
-| `CURRENT_DAYS` | trends_agent.py | 7 | Días de ventana actual para Δ |
+| `LIFECYCLE_ALPHA` | trends_agent.py | 2 | Multiplicador de vida media para ventana adaptativa (α=2 → 75% del ciclo) |
+| `FALLBACK_WINDOW_DAYS` | trends_agent.py | 2 | Ventana fallback si no se puede calcular half-life |
+| `MIN_WINDOW_HOURS` | trends_agent.py | 6 | Mínimo absoluto de ventana de evaluación |
+| `MAX_WINDOW_DAYS` | trends_agent.py | 7 | Máximo absoluto de ventana de evaluación |
 | `min_topic_size` | trends_agent.py | 50 | Tamaño mínimo de tópico BERTopic (~365 tópicos con corpus de 90 días) |
 | `MIN_TOPIC_TEXTS` | trends_agent.py | 10 | Mínimo textos en ventana actual para evaluar tópico |

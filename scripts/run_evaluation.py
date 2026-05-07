@@ -3,7 +3,7 @@ Script de evaluación del protocolo experimental.
 
 Métricas implementadas:
   --sentiment   Distribución de confianza, tasa de ambigüedad,
-                acuerdo inter-modelo RoBERTa vs VADER
+                acuerdo inter-modelo RoBERTa vs Gemini
   --groundtruth Accuracy, Precision, Recall y F1 macro contra
                 pseudo-etiquetas DeepSeek V3 (ground_truth_labels)
   --manual      Validación manual del ground truth: acuerdo DeepSeek vs
@@ -13,7 +13,7 @@ Métricas implementadas:
   --delta       Sensibilidad de parámetros Δ del agente de tendencias
   --failure-modes  Análisis estructurado de failure modes: patrones de
                 confusión, errores por confianza/longitud/decisión,
-                sarcasmo, comportamiento VADER, ejemplos representativos
+                sarcasmo, comportamiento Gemini, ejemplos representativos
   --topics      Coherencia temática c_v y UMass, comparación de
                 configuraciones de n_topics
   --stability   Estabilidad de clustering BERTopic (Jaccard similarity
@@ -100,43 +100,43 @@ def eval_sentiment(db: DatabaseManager):
     ).fetchone()[0]
     logger.info(f"\n  Tasa de ambigüedad: {ambiguous_pct:.2f}%  (ideal < 10%)")
 
-    # Acuerdo inter-modelo RoBERTa vs VADER
-    logger.info("\n[3/3] Acuerdo inter-modelo RoBERTa vs VADER (cross_validated):")
+    # Acuerdo inter-modelo RoBERTa vs Gemini
+    logger.info("\n[3/3] Acuerdo inter-modelo RoBERTa vs Gemini (cross_validated + rescued):")
     cross_total = conn.execute(
-        "SELECT COUNT(*) FROM sentiment_results WHERE decision = 'cross_validated'"
+        "SELECT COUNT(*) FROM sentiment_results WHERE decision IN ('cross_validated', 'rescued')"
     ).fetchone()[0]
 
     if cross_total == 0:
-        logger.warning("  No hay textos cross_validated.")
+        logger.warning("  No hay textos cross_validated/rescued.")
     else:
+        # Acuerdo inter-modelo RoBERTa vs Gemini
         agree = conn.execute("""
             SELECT COUNT(*) FROM sentiment_results
-            WHERE decision = 'cross_validated'
-              AND roberta_label = vader_label
+            WHERE decision IN ('cross_validated', 'rescued')
+              AND roberta_label = gemini_label
         """).fetchone()[0]
         disagree = cross_total - agree
         agree_pct = agree / cross_total * 100
 
-        logger.info(f"  Total cross_validated : {cross_total}")
+        logger.info(f"  Total cross_validated+rescued: {cross_total}")
         logger.info(f"  Acuerdo (coinciden)   : {agree} ({agree_pct:.1f}%)")
         logger.info(f"  Desacuerdo            : {disagree} ({100-agree_pct:.1f}%)")
         logger.info(f"\n  Interpretación: con {agree_pct:.1f}% de acuerdo inter-modelo,")
         if agree_pct >= 70:
-            logger.info("  RoBERTa muestra consistencia sólida con VADER en zona de incertidumbre.")
+            logger.info("  RoBERTa muestra consistencia sólida con Gemini en zona de incertidumbre.")
         else:
-            logger.info("  Alta discrepancia — zona de incertidumbre es genuinamente ambigua.")
+            logger.info("  Discrepancia significativa — Gemini aporta perspectiva complementaria.")
 
-        # Desglose por label cuando hay desacuerdo
-        logger.info("\n  Desacuerdos por label RoBERTa:")
-        rows = conn.execute("""
-            SELECT roberta_label, vader_label, COUNT(*) as cnt
+        # Desglose por decisión
+        logger.info("\n  Distribución por decisión:")
+        dec_rows = conn.execute("""
+            SELECT decision, COUNT(*) as cnt
             FROM sentiment_results
-            WHERE decision = 'cross_validated' AND roberta_label != vader_label
-            GROUP BY roberta_label, vader_label
-            ORDER BY cnt DESC
+            WHERE decision IN ('cross_validated', 'rescued')
+            GROUP BY decision ORDER BY cnt DESC
         """).fetchall()
-        for r in rows:
-            logger.info(f"    RoBERTa={r['roberta_label']:<10} VADER={r['vader_label']:<10} → {r['cnt']} casos")
+        for r in dec_rows:
+            logger.info(f"    {r['decision']:<20} → {r['cnt']:,} textos")
 
     # Distribución final de labels
     logger.info("\n  Distribución final de sentimiento:")
@@ -564,7 +564,7 @@ def eval_compare(db: DatabaseManager):
     logger.info(f"  {'Enfoque':<35} {'N':>8} {'Cobertura':>10} {'Accuracy':>10} {'F1 macro':>10}")
     logger.info(f"  {'-'*75}")
     logger.info(f"  {'Pipeline (RoBERTa directo)':<35} {total:>8,} {'100.0%':>10} {acc_pipe:>10.4f} {f1_pipe:>10.3f}")
-    logger.info(f"  {'Agentic (RoBERTa+VADER+umbrales)':<35} {len(non_amb):>8,} {100-ambiguous_pct:>9.1f}% {acc_ag:>10.4f} {f1_ag:>10.3f}")
+    logger.info(f"  {'Agentic (RoBERTa+Gemini+umbrales)':<35} {len(non_amb):>8,} {100-ambiguous_pct:>9.1f}% {acc_ag:>10.4f} {f1_ag:>10.3f}")
 
     logger.info("\n  ── Ganancia por abstención informada ───────────────────────")
     logger.info(f"  Pipeline sobre textos ambiguous (los {ambiguous_n:,} excluidos por el agentic):")
@@ -702,7 +702,7 @@ def eval_failure_modes(db: DatabaseManager, n_examples: int = 2):
             sr.source_id,
             sr.roberta_label,
             sr.roberta_confidence,
-            sr.vader_label,
+            sr.gemini_label,
             sr.final_label   AS agentic_pred,
             sr.decision,
             gt.llm_label     AS true_label,
@@ -822,23 +822,23 @@ def eval_failure_modes(db: DatabaseManager, n_examples: int = 2):
         ratio_str = f"{ratio:.1f}x" if ratio != float('inf') else "∞"
         logger.info(f"  {label:<35} {in_err:>8} ({err_rate:4.1f}%) {in_cor:>8} ({cor_rate:4.1f}%) {ratio_str:>8}")
 
-    # ── FM6: Acuerdo VADER en errores cross_validated ───────────────
+    # ── FM6: Acuerdo Gemini en errores cross_validated ───────────────
     logger.info(f"\n{'─'*60}")
-    logger.info("FM6: COMPORTAMIENTO DE VADER EN ERRORES CROSS_VALIDATED")
+    logger.info("FM6: COMPORTAMIENTO DE GEMINI EN ERRORES CROSS_VALIDATED")
     logger.info(f"{'─'*60}")
 
-    cv_errors = [r for r in errors if r["decision"] == "cross_validated"]
+    cv_errors = [r for r in errors if r["decision"] in ("cross_validated", "rescued")]
     if cv_errors:
-        vader_agreed_roberta = sum(1 for r in cv_errors if r["vader_label"] == r["roberta_label"])
-        vader_agreed_truth = sum(1 for r in cv_errors if r["vader_label"] == r["true_label"])
-        vader_neither = len(cv_errors) - vader_agreed_roberta - vader_agreed_truth
-        # Some might agree with both if roberta == truth (shouldn't happen in errors)
-        logger.info(f"\n  Errores cross_validated: {len(cv_errors):,}")
-        logger.info(f"  VADER coincide con RoBERTa (ambos equivocados): {vader_agreed_roberta:,} ({vader_agreed_roberta/len(cv_errors)*100:.1f}%)")
-        logger.info(f"  VADER coincide con DeepSeek (VADER tenía razón): {vader_agreed_truth:,} ({vader_agreed_truth/len(cv_errors)*100:.1f}%)")
-        logger.info(f"  VADER no coincide con ninguno: {vader_neither:,} ({vader_neither/len(cv_errors)*100:.1f}%)")
-        logger.info(f"\n  → En {vader_agreed_truth/len(cv_errors)*100:.1f}% de los errores cross_validated,")
-        logger.info(f"    VADER habría dado la respuesta correcta pero el agente priorizó RoBERTa.")
+        # Acuerdo inter-modelo RoBERTa vs Gemini
+        gemini_agreed_roberta = sum(1 for r in cv_errors if r["gemini_label"] == r["roberta_label"])
+        gemini_agreed_truth = sum(1 for r in cv_errors if r["gemini_label"] == r["true_label"])
+        gemini_neither = len(cv_errors) - gemini_agreed_roberta - gemini_agreed_truth
+        logger.info(f"\n  Errores cross_validated+rescued: {len(cv_errors):,}")
+        logger.info(f"  Gemini coincide con RoBERTa (ambos equivocados): {gemini_agreed_roberta:,} ({gemini_agreed_roberta/len(cv_errors)*100:.1f}%)")
+        logger.info(f"  Gemini coincide con DeepSeek (Gemini tenía razón): {gemini_agreed_truth:,} ({gemini_agreed_truth/len(cv_errors)*100:.1f}%)")
+        logger.info(f"  Gemini no coincide con ninguno: {gemini_neither:,} ({gemini_neither/len(cv_errors)*100:.1f}%)")
+        logger.info(f"\n  → En {gemini_agreed_truth/len(cv_errors)*100:.1f}% de los errores,")
+        logger.info(f"    Gemini habría dado la respuesta correcta.")
 
     # ── FM7: Ejemplos representativos por tipo de error ─────────────
     logger.info(f"\n{'─'*60}")
@@ -977,6 +977,338 @@ def eval_latency(db: DatabaseManager, sample_size: int = 200):
 
 
 # ------------------------------------------------------------------ #
+#  10. Baselines: tabla comparativa con 5+ enfoques                    #
+# ------------------------------------------------------------------ #
+
+def eval_baselines(db: DatabaseManager):
+    logger.info("=" * 60)
+    logger.info("BASELINES — TABLA COMPARATIVA")
+    logger.info("=" * 60)
+
+    try:
+        from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+    except ImportError:
+        logger.error("scikit-learn no instalado.")
+        return
+
+    conn = sqlite3.connect(db.db_path)
+    conn.row_factory = sqlite3.Row
+
+    rows = conn.execute("""
+        SELECT sr.roberta_label, sr.roberta_confidence, sr.final_label,
+               sr.decision, sr.gemini_label,
+               gt.llm_label AS true_label
+        FROM sentiment_results sr
+        JOIN ground_truth_labels gt
+            ON sr.source_id = gt.source_id AND sr.source_type = gt.source_type
+        WHERE gt.llm_label IN ('negative', 'neutral', 'positive')
+    """).fetchall()
+    conn.close()
+
+    if not rows:
+        logger.warning("Sin datos para baselines.")
+        return
+
+    rows = [dict(r) for r in rows]
+    labels = ["negative", "neutral", "positive"]
+    y_true = [r["true_label"] for r in rows]
+    total = len(y_true)
+
+    def calc_metrics(y_t, y_p, name, n):
+        return {
+            "approach": name,
+            "n": n,
+            "accuracy": accuracy_score(y_t, y_p),
+            "f1_macro": f1_score(y_t, y_p, labels=labels, average="macro", zero_division=0),
+            "precision_macro": precision_score(y_t, y_p, labels=labels, average="macro", zero_division=0),
+            "recall_macro": recall_score(y_t, y_p, labels=labels, average="macro", zero_division=0),
+        }
+
+    results = []
+
+    # 1. Majority class baseline
+    from collections import Counter
+    majority = Counter(y_true).most_common(1)[0][0]
+    y_majority = [majority] * total
+    results.append(calc_metrics(y_true, y_majority, f"Majority class ({majority})", total))
+
+    # 2. RoBERTa only (sin umbrales = pipeline)
+    y_roberta = [r["roberta_label"] for r in rows]
+    results.append(calc_metrics(y_true, y_roberta, "RoBERTa only (pipeline)", total))
+
+    # 3. Gemini only
+    gemini_rows = [r for r in rows if r.get("gemini_label") and r["gemini_label"] in labels]
+    if gemini_rows:
+        y_true_gem = [r["true_label"] for r in gemini_rows]
+        y_gemini = [r["gemini_label"] for r in gemini_rows]
+        results.append(calc_metrics(y_true_gem, y_gemini, "Gemini only", len(gemini_rows)))
+
+    # 4. RoBERTa + Gemini sin abstención (forzar clasificación de ambiguos)
+    y_no_abstain = []
+    for r in rows:
+        if r["final_label"] == "ambiguous":
+            y_no_abstain.append(r["roberta_label"])
+        else:
+            y_no_abstain.append(r["final_label"])
+    results.append(calc_metrics(y_true, y_no_abstain, "RoBERTa+Gemini sin abstencion", total))
+
+    # 5. Agentic completo (excl. ambiguous)
+    non_amb = [r for r in rows if r["final_label"] != "ambiguous"]
+    y_true_ag = [r["true_label"] for r in non_amb]
+    y_agentic = [r["final_label"] for r in non_amb]
+    results.append(calc_metrics(y_true_ag, y_agentic, "Agentic completo", len(non_amb)))
+
+    # Mostrar tabla
+    logger.info(f"\n  {'Enfoque':<35} {'N':>8} {'Accuracy':>10} {'F1 macro':>10} {'Precision':>10} {'Recall':>10}")
+    logger.info(f"  {'-'*85}")
+    for r in results:
+        logger.info(
+            f"  {r['approach']:<35} {r['n']:>8,} {r['accuracy']:>10.4f} "
+            f"{r['f1_macro']:>10.4f} {r['precision_macro']:>10.4f} {r['recall_macro']:>10.4f}"
+        )
+
+    # Generar gráfico
+    try:
+        from src.reporting.report_generator import ReportGenerator
+        rg = ReportGenerator()
+        rg.plot_comparison_table(results, title="Comparacion de Baselines")
+        logger.info(f"\n  Tabla visual guardada en: {rg.output_dir}")
+    except Exception as e:
+        logger.warning(f"No se pudo generar gráfico: {e}")
+
+    logger.info("=" * 60)
+
+
+# ------------------------------------------------------------------ #
+#  11. Ablation Studies                                                #
+# ------------------------------------------------------------------ #
+
+def eval_ablation(db: DatabaseManager):
+    logger.info("=" * 60)
+    logger.info("ESTUDIOS DE ABLACIÓN")
+    logger.info("=" * 60)
+
+    try:
+        from sklearn.metrics import accuracy_score, f1_score
+    except ImportError:
+        logger.error("scikit-learn no instalado.")
+        return
+
+    conn = sqlite3.connect(db.db_path)
+    conn.row_factory = sqlite3.Row
+
+    rows = conn.execute("""
+        SELECT sr.roberta_label, sr.roberta_confidence, sr.final_label,
+               sr.decision, sr.gemini_label,
+               gt.llm_label AS true_label
+        FROM sentiment_results sr
+        JOIN ground_truth_labels gt
+            ON sr.source_id = gt.source_id AND sr.source_type = gt.source_type
+        WHERE gt.llm_label IN ('negative', 'neutral', 'positive')
+    """).fetchall()
+    conn.close()
+
+    if not rows:
+        logger.warning("Sin datos para ablación.")
+        return
+
+    rows = [dict(r) for r in rows]
+    labels = ["negative", "neutral", "positive"]
+
+    # Referencia: agentic completo
+    non_amb = [r for r in rows if r["final_label"] != "ambiguous"]
+    y_true_ref = [r["true_label"] for r in non_amb]
+    y_pred_ref = [r["final_label"] for r in non_amb]
+    acc_ref = accuracy_score(y_true_ref, y_pred_ref)
+    f1_ref = f1_score(y_true_ref, y_pred_ref, labels=labels, average="macro", zero_division=0)
+
+    logger.info(f"\n  Referencia (agentic completo):")
+    logger.info(f"    N={len(non_amb):,}  Accuracy={acc_ref:.4f}  F1={f1_ref:.4f}")
+
+    # Ablación 1: Sin Gemini (usa solo roberta_label para todos)
+    logger.info(f"\n  ── Ablación 1: Sin Gemini (solo RoBERTa) ──")
+    y_no_gemini = []
+    y_true_ng = []
+    for r in rows:
+        if r["decision"] == "ambiguous":
+            continue
+        y_true_ng.append(r["true_label"])
+        y_no_gemini.append(r["roberta_label"])
+
+    acc_ng = accuracy_score(y_true_ng, y_no_gemini)
+    f1_ng = f1_score(y_true_ng, y_no_gemini, labels=labels, average="macro", zero_division=0)
+    logger.info(f"    N={len(y_true_ng):,}  Accuracy={acc_ng:.4f}  F1={f1_ng:.4f}")
+    logger.info(f"    Δ accuracy: {acc_ng - acc_ref:+.4f}  Δ F1: {f1_ng - f1_ref:+.4f}")
+
+    # Ablación 2: Sin abstención (ambiguos reciben roberta_label)
+    logger.info(f"\n  ── Ablación 2: Sin abstención ──")
+    y_true_all = [r["true_label"] for r in rows]
+    y_no_abs = []
+    for r in rows:
+        if r["final_label"] == "ambiguous":
+            y_no_abs.append(r["roberta_label"])
+        else:
+            y_no_abs.append(r["final_label"])
+
+    acc_na = accuracy_score(y_true_all, y_no_abs)
+    f1_na = f1_score(y_true_all, y_no_abs, labels=labels, average="macro", zero_division=0)
+    logger.info(f"    N={len(y_true_all):,}  Accuracy={acc_na:.4f}  F1={f1_na:.4f}")
+    logger.info(f"    Δ accuracy vs ref: {acc_na - acc_ref:+.4f}  Δ F1: {f1_na - f1_ref:+.4f}")
+
+    # Ablación 3: Sweep de umbrales
+    logger.info(f"\n  ── Ablación 3: Sweep de umbrales ──")
+    logger.info(f"  {'high_conf':>10} {'low_conf':>10} {'N eval':>8} {'% excl':>8} {'Accuracy':>10} {'F1':>10}")
+    logger.info(f"  {'-'*60}")
+
+    for high in [0.95, 0.90, 0.85, 0.80, 0.75]:
+        for low in [0.60, 0.55, 0.50, 0.45, 0.40]:
+            if low >= high:
+                continue
+            y_t = []
+            y_p = []
+            n_excl = 0
+            for r in rows:
+                conf = r["roberta_confidence"]
+                if conf <= low:
+                    n_excl += 1
+                    continue
+                y_t.append(r["true_label"])
+                if conf > high:
+                    y_p.append(r["roberta_label"])
+                else:
+                    # Cross-validate zone: use final_label
+                    y_p.append(r["final_label"] if r["final_label"] != "ambiguous" else r["roberta_label"])
+
+            if not y_t:
+                continue
+            a = accuracy_score(y_t, y_p)
+            f = f1_score(y_t, y_p, labels=labels, average="macro", zero_division=0)
+            pct_excl = n_excl / len(rows) * 100
+            marker = " ← actual" if high == 0.85 and low == 0.50 else ""
+            logger.info(f"  {high:>10.2f} {low:>10.2f} {len(y_t):>8,} {pct_excl:>7.1f}% {a:>10.4f} {f:>10.4f}{marker}")
+
+    logger.info("=" * 60)
+
+
+# ------------------------------------------------------------------ #
+#  12. Ground Truth Quality (Cohen's Kappa)                            #
+# ------------------------------------------------------------------ #
+
+def eval_gt_quality(db: DatabaseManager, csv_path: str = "ground_truth_manual.csv"):
+    logger.info("=" * 60)
+    logger.info("CALIDAD DEL GROUND TRUTH — COHEN'S KAPPA")
+    logger.info("=" * 60)
+
+    try:
+        from sklearn.metrics import cohen_kappa_score, confusion_matrix, accuracy_score
+        import pandas as pd
+    except ImportError:
+        logger.error("scikit-learn y pandas requeridos.")
+        return
+
+    csv_file = Path(csv_path)
+    if not csv_file.exists():
+        csv_file = Path(__file__).parent.parent / csv_path
+    if not csv_file.exists():
+        logger.warning(f"No se encontró {csv_path}. Se necesita CSV con columnas: source_id, source_type, human_label")
+        logger.info("Calculando métricas disponibles sin etiquetas manuales...")
+
+        # Métricas internas del ground truth
+        conn = sqlite3.connect(db.db_path)
+        conn.row_factory = sqlite3.Row
+        gt_stats = conn.execute("""
+            SELECT llm_label, COUNT(*) as cnt
+            FROM ground_truth_labels
+            GROUP BY llm_label
+        """).fetchall()
+        total_gt = conn.execute("SELECT COUNT(*) FROM ground_truth_labels").fetchone()[0]
+        conn.close()
+
+        logger.info(f"\n  Total etiquetas DeepSeek V3: {total_gt:,}")
+        for row in gt_stats:
+            pct = row["cnt"] / total_gt * 100 if total_gt else 0
+            logger.info(f"    {row['llm_label']}: {row['cnt']:,} ({pct:.1f}%)")
+        logger.info("=" * 60)
+        return
+
+    df = pd.read_csv(csv_file)
+
+    if "human_label" not in df.columns:
+        # Try alternative column names
+        for col in ["manual_label", "label", "human"]:
+            if col in df.columns:
+                df["human_label"] = df[col]
+                break
+
+    if "human_label" not in df.columns:
+        logger.error(f"CSV debe tener columna 'human_label'. Columnas encontradas: {list(df.columns)}")
+        return
+
+    conn = sqlite3.connect(db.db_path)
+    conn.row_factory = sqlite3.Row
+    gt_rows = conn.execute("SELECT source_id, source_type, llm_label FROM ground_truth_labels").fetchall()
+    conn.close()
+
+    gt_map = {(r["source_id"], r["source_type"]): r["llm_label"] for r in gt_rows}
+
+    matched = []
+    for _, row in df.iterrows():
+        key = (str(row["source_id"]), str(row.get("source_type", "comment")))
+        if key in gt_map:
+            matched.append({
+                "human": row["human_label"].strip().lower(),
+                "deepseek": gt_map[key],
+            })
+
+    if not matched:
+        logger.warning("No se encontraron coincidencias entre CSV y ground_truth_labels.")
+        return
+
+    labels = ["negative", "neutral", "positive"]
+    y_human = [m["human"] for m in matched]
+    y_deepseek = [m["deepseek"] for m in matched]
+
+    kappa = cohen_kappa_score(y_human, y_deepseek, labels=labels)
+    acc = accuracy_score(y_human, y_deepseek)
+
+    logger.info(f"\n  Textos comparados: {len(matched)}")
+    logger.info(f"  Cohen's Kappa (DeepSeek vs humano): {kappa:.4f}")
+    logger.info(f"  Agreement rate: {acc:.4f} ({acc*100:.2f}%)")
+
+    # Interpretación
+    if kappa >= 0.81:
+        interp = "Casi perfecto"
+    elif kappa >= 0.61:
+        interp = "Sustancial"
+    elif kappa >= 0.41:
+        interp = "Moderado"
+    elif kappa >= 0.21:
+        interp = "Justo"
+    else:
+        interp = "Pobre"
+    logger.info(f"  Interpretación (Landis & Koch): {interp}")
+
+    # Confusion matrix
+    cm = confusion_matrix(y_human, y_deepseek, labels=labels)
+    logger.info(f"\n  Matriz de confusión (filas=humano, columnas=DeepSeek):")
+    header = f"  {'':>12}" + "".join(f"  {l[:6]:>8}" for l in labels)
+    logger.info(header)
+    for i, label in enumerate(labels):
+        row_str = "  ".join(f"{cm[i][j]:>8,}" for j in range(len(labels)))
+        logger.info(f"  {label[:6]:>12}  {row_str}")
+
+    # Agreement per class
+    logger.info(f"\n  Acuerdo por clase:")
+    for i, label in enumerate(labels):
+        class_mask_h = [1 if y == label else 0 for y in y_human]
+        class_mask_d = [1 if y == label else 0 for y in y_deepseek]
+        agree = sum(1 for h, d in zip(class_mask_h, class_mask_d) if h == d)
+        logger.info(f"    {label}: {agree}/{len(matched)} ({agree/len(matched)*100:.1f}%)")
+
+    logger.info("=" * 60)
+
+
+# ------------------------------------------------------------------ #
 #  Main                                                               #
 # ------------------------------------------------------------------ #
 
@@ -991,6 +1323,9 @@ def main():
     parser.add_argument("--stability",   action="store_true", help="Estabilidad de clustering (3 runs BERTopic)")
     parser.add_argument("--failure-modes", action="store_true", help="Análisis estructurado de failure modes")
     parser.add_argument("--latency",     action="store_true", help="Latencia comparativa con/sin agente")
+    parser.add_argument("--baselines",   action="store_true", help="Tabla comparativa con 5+ baselines")
+    parser.add_argument("--ablation",    action="store_true", help="Estudios de ablación (3 estudios)")
+    parser.add_argument("--gt-quality",  action="store_true", help="Calidad del ground truth (Cohen's Kappa)")
     parser.add_argument("--all",         action="store_true", help="Ejecutar todas las métricas")
     parser.add_argument("--manual-csv",  type=str, default="ground_truth_manual.csv",
                         help="Ruta al CSV con etiquetas manuales (default: ground_truth_manual.csv)")
@@ -1000,7 +1335,9 @@ def main():
                         help="Textos para test de latencia (default: 200)")
     args = parser.parse_args()
 
-    if not any([args.sentiment, args.groundtruth, args.manual, args.compare, args.delta, args.failure_modes, args.topics, args.stability, args.latency, args.all]):
+    if not any([args.sentiment, args.groundtruth, args.manual, args.compare, args.delta,
+                args.failure_modes, args.topics, args.stability, args.latency,
+                args.baselines, args.ablation, args.gt_quality, args.all]):
         parser.print_help()
         return
 
@@ -1032,6 +1369,15 @@ def main():
 
     if args.all or args.latency:
         eval_latency(db, sample_size=args.latency_sample)
+
+    if args.all or args.baselines:
+        eval_baselines(db)
+
+    if args.all or args.ablation:
+        eval_ablation(db)
+
+    if args.all or args.gt_quality:
+        eval_gt_quality(db, csv_path=args.manual_csv)
 
 
 if __name__ == "__main__":

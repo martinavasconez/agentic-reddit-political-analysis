@@ -200,11 +200,6 @@ def main():
         "--arctic", action="store_true",
         help="Recolección histórica usando Arctic Shift API (archivo público de Reddit, usar con --days)"
     )
-    # Modo histórico vía PRAW timestamp search (limitado)
-    parser.add_argument(
-        "--historical", action="store_true",
-        help="Recolección histórica vía búsqueda Lucene por timestamp (PRAW, sin límite por día)"
-    )
 
     args = parser.parse_args()
 
@@ -232,28 +227,6 @@ def main():
         stats = db.get_stats()
         logger.info(f"BD final: {stats['total_posts']} posts, {stats['total_comments']} comentarios")
 
-    elif args.historical:
-        subreddits = args.subreddits or TARGET_SUBREDDITS
-        logger.info("=" * 60)
-        logger.info("RECOLECCIÓN HISTÓRICA — PRAW (sin límite por día)")
-        logger.info(f"Subreddits: {subreddits}")
-        logger.info(f"Días: {args.days}")
-        logger.info("=" * 60)
-        all_results = []
-        for sub in subreddits:
-            result = collector.collect_historical(
-                sub,
-                days=args.days,
-                max_comments_per_post=args.max_posts,
-            )
-            all_results.append(result)
-            dist = result.get("daily_distribution", {})
-            days_ok = sum(1 for v in dist.values() if v > 0)
-            logger.info(f"  r/{sub}: {result['new_posts_inserted']} posts, "
-                        f"{result['new_comments_inserted']} comentarios, "
-                        f"{days_ok}/{args.days} días con datos")
-        stats = db.get_stats()
-        logger.info(f"BD final: {stats['total_posts']} posts, {stats['total_comments']} comentarios")
     elif args.live:
         run_live_demo(collector, db, args)
     elif args.continuous:

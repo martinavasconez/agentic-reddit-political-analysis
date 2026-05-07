@@ -39,8 +39,7 @@ def main():
             sr.final_label,
             sr.roberta_confidence,
             sr.decision,
-            sr.vader_compound,
-            sr.vader_label
+            sr.gemini_label
         FROM sentiment_results sr
         JOIN preprocessed_texts pt
             ON sr.source_id = pt.source_id AND sr.source_type = pt.source_type
@@ -55,11 +54,9 @@ def main():
 
     for i, r in enumerate(rows, 1):
         icon = LABEL_ICON.get(r["final_label"], "?")
-        vader_info = ""
-        if r["vader_compound"] is not None:
-            vader_info = f" | VADER={r['vader_compound']:+.3f} ({r['vader_label']})"
+        gemini_info = f" | Gemini={r['gemini_label']}" if r["gemini_label"] else ""
 
-        print(f"[{i:03d}] {icon}  conf={r['roberta_confidence']:.3f}  {r['decision']}{vader_info}")
+        print(f"[{i:03d}] {icon}  conf={r['roberta_confidence']:.3f}  {r['decision']}{gemini_info}")
         print(f"      {r['original_text']}")
         print()
 

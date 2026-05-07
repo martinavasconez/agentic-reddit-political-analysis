@@ -82,9 +82,8 @@ CREATE TABLE IF NOT EXISTS sentiment_results (
     -- Clasificación final
     final_label TEXT NOT NULL,            -- positive / negative / neutral / ambiguous
     final_confidence REAL NOT NULL,
-    -- VADER (solo si decision = 'cross_validated')
-    vader_compound REAL,
-    vader_label TEXT,
+    -- Cross-validación Gemini LLM
+    gemini_label TEXT,                    -- Etiqueta de Gemini (solo si decision != 'accepted')
     -- Metadatos
     analyzed_at TEXT NOT NULL,
     FOREIGN KEY (preprocessed_text_id) REFERENCES preprocessed_texts(id),
@@ -136,8 +135,6 @@ CREATE TABLE IF NOT EXISTS trend_analysis (
     n_current_texts INTEGER NOT NULL,      -- Textos en ventana actual con este tópico
     n_historical_texts INTEGER NOT NULL,   -- Textos históricos con este tópico
     corpus_coverage REAL NOT NULL,         -- % del corpus total cubierto por tópico
-    -- Datos para evaluación de tendencia moderada (3+ días crecientes)
-    consecutive_growth_days INTEGER DEFAULT 0,
     -- Decisión ReAct
     trend_decision TEXT NOT NULL,          -- emerging_trend / localized_spike / moderate_trend / discarded
     trend_reason TEXT NOT NULL,            -- Razón textual de la decisión
@@ -177,4 +174,31 @@ CREATE TABLE IF NOT EXISTS collection_runs (
     status TEXT DEFAULT 'running',     -- running, completed, failed
     parameters TEXT                     -- JSON con parámetros usados
 );
+
+
+-- Reportes de validación generados por el agente
+CREATE TABLE IF NOT EXISTS validation_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_run_id TEXT,                -- run de tendencias evaluado (nullable)
+    report_path TEXT NOT NULL,        -- Ruta al directorio del reporte
+    n_sentiment_analyzed INTEGER DEFAULT 0,
+    n_trends_analyzed INTEGER DEFAULT 0,
+    summary_json TEXT,                -- JSON con hallazgos clave
+    generated_at TEXT NOT NULL
+);
+
+-- Ejecuciones del orquestador LangGraph
+CREATE TABLE IF NOT EXISTS orchestration_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL UNIQUE,       -- UUID del run
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT DEFAULT 'running',     -- running, completed, failed
+    steps_completed TEXT,              -- JSON: ["preprocess", "sentiment", ...]
+    config_json TEXT,                  -- JSON con parámetros del run
+    results_json TEXT,                 -- JSON con métricas de cada paso
+    error_message TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_orchestration_run_id ON orchestration_runs(run_id);
 """

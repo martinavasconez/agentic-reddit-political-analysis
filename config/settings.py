@@ -39,5 +39,8 @@ MAX_TEXT_LENGTH = 10000           # Máximo de caracteres por texto (trunca si s
 ROBERTA_MAX_TOKENS = 512          # Límite de tokens para RoBERTa
 BERTOPIC_MIN_WORDS = 15           # Mínimo de palabras para BERTopic (requiere más contexto)
 
+# Gemini API (síntesis textual del agente de validación)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

@@ -40,6 +40,25 @@ def main():
         logger.info(f"Comentarios en DB: {stats['total_comments']}")
         logger.info(f"Textos preprocesados: {stats['total_preprocessed']}")
         logger.info(f"Textos válidos para análisis: {stats['valid_preprocessed']}")
+
+        import sqlite3
+        conn = sqlite3.connect(db.db_path)
+        pending_comments = conn.execute("""
+            SELECT COUNT(*) FROM comments c
+            LEFT JOIN preprocessed_texts pt ON c.id = pt.source_id AND pt.source_type = 'comment'
+            WHERE pt.id IS NULL
+        """).fetchone()[0]
+        pending_posts = conn.execute("""
+            SELECT COUNT(*) FROM posts p
+            LEFT JOIN preprocessed_texts pt ON p.id = pt.source_id AND pt.source_type = 'post'
+            WHERE pt.id IS NULL
+              AND p.is_self = 1
+              AND p.selftext != ''
+              AND p.selftext NOT IN ('[deleted]', '[removed]')
+        """).fetchone()[0]
+        conn.close()
+
+        logger.info(f"Pendientes de preprocesar: {pending_comments} comentarios, {pending_posts} posts")
         return
 
     # Procesar textos pendientes

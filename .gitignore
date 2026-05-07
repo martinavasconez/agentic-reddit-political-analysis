@@ -20,6 +20,12 @@ data/*.csv
 data/*.json
 data/evaluation/*.csv
 
+# Reports (generated output)
+reports/
+
+# Docs (diagrams, images)
+docs/
+
 # Logs
 logs/
 

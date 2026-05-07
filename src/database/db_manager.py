@@ -384,8 +384,8 @@ class DatabaseManager:
                     (preprocessed_text_id, source_id, source_type, subreddit,
                      roberta_label, roberta_confidence, decision,
                      final_label, final_confidence,
-                     vader_compound, vader_label, analyzed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     gemini_label, analyzed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     r["preprocessed_text_id"],
                     r["source_id"],
@@ -396,8 +396,7 @@ class DatabaseManager:
                     r["decision"],
                     r["final_label"],
                     r["final_confidence"],
-                    r.get("vader_compound"),
-                    r.get("vader_label"),
+                    r.get("gemini_label"),
                     r["analyzed_at"],
                 ))
                 if cursor.rowcount > 0:
@@ -508,9 +507,9 @@ class DatabaseManager:
                      current_window_start, current_window_end,
                      historical_window_start, historical_window_end,
                      n_current_texts, n_historical_texts, corpus_coverage,
-                     consecutive_growth_days, trend_decision, trend_reason,
+                     trend_decision, trend_reason,
                      daily_weights_json, analyzed_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     t["model_run_id"],
                     t["topic_id"],
@@ -527,7 +526,6 @@ class DatabaseManager:
                     t["n_current_texts"],
                     t["n_historical_texts"],
                     t["corpus_coverage"],
-                    t.get("consecutive_growth_days", 0),
                     t["trend_decision"],
                     t["trend_reason"],
                     t.get("daily_weights_json"),
@@ -564,6 +562,175 @@ class DatabaseManager:
                 ORDER BY assigned_at DESC LIMIT 1
             """).fetchone()
             return row["model_run_id"] if row else None
+        finally:
+            conn.close()
+
+    # Validation Reports
+
+    def insert_validation_report(self, report_data: dict) -> int:
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute("""
+                INSERT INTO validation_reports
+                (model_run_id, report_path, n_sentiment_analyzed,
+                 n_trends_analyzed, summary_json, generated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                report_data.get("model_run_id"),
+                report_data["report_path"],
+                report_data.get("n_sentiment_analyzed", 0),
+                report_data.get("n_trends_analyzed", 0),
+                json.dumps(report_data.get("summary", {}), ensure_ascii=False),
+                datetime.utcnow().isoformat(),
+            ))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    # Orchestration Runs
+
+    def start_orchestration_run(self, run_id: str, config: dict) -> int:
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute("""
+                INSERT INTO orchestration_runs
+                (run_id, started_at, config_json)
+                VALUES (?, ?, ?)
+            """, (run_id, datetime.utcnow().isoformat(), json.dumps(config)))
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def update_orchestration_run(self, run_id: str, **kwargs):
+        conn = self._get_connection()
+        try:
+            sets = []
+            params = []
+            if "status" in kwargs:
+                sets.append("status = ?")
+                params.append(kwargs["status"])
+            if "steps_completed" in kwargs:
+                sets.append("steps_completed = ?")
+                params.append(json.dumps(kwargs["steps_completed"]))
+            if "results" in kwargs:
+                sets.append("results_json = ?")
+                params.append(json.dumps(kwargs["results"], ensure_ascii=False))
+            if "error_message" in kwargs:
+                sets.append("error_message = ?")
+                params.append(kwargs["error_message"])
+            if kwargs.get("finished"):
+                sets.append("finished_at = ?")
+                params.append(datetime.utcnow().isoformat())
+            if sets:
+                params.append(run_id)
+                conn.execute(
+                    f"UPDATE orchestration_runs SET {', '.join(sets)} WHERE run_id = ?",
+                    params,
+                )
+                conn.commit()
+        finally:
+            conn.close()
+
+    # Cross-table queries
+
+    def get_sentiment_by_trending_topics(self, model_run_id: str) -> list[dict]:
+        """JOIN sentimiento por tópico trending para el agente de validación."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT
+                    ta_trend.topic_id,
+                    ta_trend.topic_label,
+                    ta_trend.delta,
+                    ta_trend.trend_decision,
+                    ta_trend.n_current_texts,
+                    sr.final_label,
+                    COUNT(*) as count
+                FROM trend_analysis ta_trend
+                JOIN topic_assignments ta
+                    ON ta.topic_id = ta_trend.topic_id
+                    AND ta.model_run_id = ta_trend.model_run_id
+                JOIN sentiment_results sr
+                    ON sr.source_id = ta.source_id
+                    AND sr.source_type = ta.source_type
+                WHERE ta_trend.model_run_id = ?
+                  AND ta_trend.trend_decision IN ('emerging_trend', 'moderate_trend', 'localized_spike')
+                GROUP BY ta_trend.topic_id, sr.final_label
+                ORDER BY ta_trend.delta DESC
+            """, (model_run_id,)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_all_sentiment_results(self, limit: int = 500000) -> list[dict]:
+        """Todos los resultados de sentimiento."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT * FROM sentiment_results
+                ORDER BY analyzed_at DESC LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_texts_for_topic(self, topic_id: int, model_run_id: str,
+                            limit: int = 200) -> list[dict]:
+        """Textos reales asignados a un tópico específico."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT pt.cleaned_text, pt.source_type, pt.created_utc,
+                       sr.final_label, sr.final_confidence
+                FROM topic_assignments ta
+                JOIN preprocessed_texts pt
+                    ON pt.source_id = ta.source_id AND pt.source_type = ta.source_type
+                LEFT JOIN sentiment_results sr
+                    ON sr.source_id = ta.source_id AND sr.source_type = ta.source_type
+                WHERE ta.topic_id = ? AND ta.model_run_id = ?
+                ORDER BY pt.created_utc DESC
+                LIMIT ?
+            """, (topic_id, model_run_id, limit)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    # Pipeline Tradicional (baseline sin agentic)
+
+    def get_unanalyzed_texts_for_pipeline(self, limit: int = 1000) -> list[dict]:
+        """Textos preprocesados válidos para el pipeline tradicional (misma query que sentimiento)."""
+        return self.get_unanalyzed_texts_for_sentiment(limit=limit)
+
+    def insert_pipeline_results_batch(self, results: list[dict]) -> int:
+        """Inserta resultados del pipeline tradicional como sentiment_results con decision='pipeline'."""
+        conn = self._get_connection()
+        inserted = 0
+        try:
+            for r in results:
+                cursor = conn.execute("""
+                    INSERT OR IGNORE INTO sentiment_results
+                    (preprocessed_text_id, source_id, source_type, subreddit,
+                     roberta_label, roberta_confidence, decision,
+                     final_label, final_confidence,
+                     gemini_label, analyzed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, 'pipeline', ?, ?, NULL, ?)
+                """, (
+                    r["preprocessed_text_id"],
+                    r["source_id"],
+                    r["source_type"],
+                    r["subreddit"],
+                    r["roberta_label"],
+                    r["roberta_confidence"],
+                    r["roberta_label"],
+                    r["roberta_confidence"],
+                    r["analyzed_at"],
+                ))
+                if cursor.rowcount > 0:
+                    inserted += 1
+            conn.commit()
+            return inserted
         finally:
             conn.close()
 

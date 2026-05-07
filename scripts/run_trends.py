@@ -23,8 +23,6 @@ from src.agents.trends.trends_agent import (
     DELTA_HIGH,
     DELTA_MODERATE,
     COVERAGE_THRESHOLD,
-    HISTORICAL_DAYS,
-    CURRENT_DAYS,
 )
 from src.database.db_manager import DatabaseManager
 
@@ -156,10 +154,8 @@ def main():
                         help="Máximo de textos a cargar (default: 50000)")
     parser.add_argument("--n-topics", type=int, default=None,
                         help="Forzar número de tópicos (default: auto)")
-    parser.add_argument("--historical-days", type=int, default=HISTORICAL_DAYS,
-                        help=f"Días de ventana histórica/entrenamiento (default: {HISTORICAL_DAYS})")
-    parser.add_argument("--current-days", type=int, default=CURRENT_DAYS,
-                        help=f"Días de ventana de evaluación (default: {CURRENT_DAYS})")
+    parser.add_argument("--current-days", type=float, default=None,
+                        help="Forzar ventana de evaluación en días (default: adaptativo)")
     parser.add_argument("--delta-high", type=float, default=DELTA_HIGH,
                         help=f"Umbral Δ alto (default: {DELTA_HIGH})")
     parser.add_argument("--delta-moderate", type=float, default=DELTA_MODERATE,
@@ -188,18 +184,18 @@ def main():
     agent = TrendsAgent(
         db=db,
         n_topics=args.n_topics,
-        historical_days=args.historical_days,
         current_days=args.current_days,
         delta_high=args.delta_high,
         delta_moderate=args.delta_moderate,
         coverage_threshold=args.coverage,
     )
 
+    window_str = f"{args.current_days} días (forzado)" if args.current_days else "adaptativo"
     logger.info("=" * 60)
     logger.info("AGENTE DE DETECCIÓN DE TENDENCIAS")
     logger.info(f"  Límite textos  : {args.limit}")
     logger.info(f"  N tópicos      : {args.n_topics or 'auto'}")
-    logger.info(f"  Ventana actual : últimos {args.current_days} días")
+    logger.info(f"  Ventana eval   : {window_str}")
     logger.info(f"  Δ alto/mod     : {args.delta_high} / {args.delta_moderate}")
     logger.info(f"  Cobertura mín  : {args.coverage:.0%}")
     logger.info("=" * 60)
