@@ -34,9 +34,10 @@ Reddit Data (PRAW / Arctic Shift)
 
 ## Corpus
 
-- **Recoleccion historica**: ~90 dias via [Arctic Shift API](https://arctic-shift.photon-reddit.com) (r/politics, Dic 2025 - Mar 2026)
-- **Recoleccion en tiempo real**: PRAW para datos recientes
-- **Total**: ~203,000 textos analizados
+- **Recoleccion historica**: 94 dias via [Arctic Shift API](https://arctic-shift.photon-reddit.com) (r/politics, 2025-12-18 a 2026-03-22) — 201,568 textos
+- **Recoleccion en tiempo real**: PRAW para demo en vivo y datos incrementales
+- **Ventana de evaluacion**: 1.57 dias (2026-03-22 a 2026-03-24) — 1,707 textos
+- **Total**: 203,275 textos analizados
 
 ## Resultados
 
@@ -90,7 +91,7 @@ python -m scripts.run_orchestrator
 python -m scripts.run_evaluation --all
 
 # 6. Interfaz Streamlit
-streamlit run app.py
+streamlit run src/app.py
 ```
 
 ### Ejecucion por agentes individuales
@@ -112,7 +113,7 @@ python -m scripts.collect_data --live --minutes 5
 python -m scripts.run_orchestrator --skip-preprocess
 
 # Abrir dashboard
-streamlit run app.py
+streamlit run src/app.py
 ```
 
 ### Inspeccion de datos
@@ -181,7 +182,8 @@ agentic-reddit-political-analysis/
 |   |-- inspect_ground_truth.py     # Inspeccion GT vs sistema
 |   |-- inspect_preprocessing.py    # Inspeccion de preprocesamiento
 |
-|-- app.py                          # Interfaz Streamlit (dashboard)
+|   |-- app.py                      # Interfaz Streamlit (dashboard)
+|
 |-- data/                           # Base de datos SQLite
 |-- reports/                        # Reportes generados (graficos + markdown)
 |-- docs/                           # Diagramas draw.io y PNG
@@ -207,4 +209,4 @@ agentic-reddit-political-analysis/
 
 ## Documentacion
 
-- [`DOCUMENTACION_CODIGO.md`](DOCUMENTACION_CODIGO.md) — Documentacion tecnica de todos los modulos
+La documentacion tecnica detallada de cada modulo se encuentra en el documento final de tesis.
