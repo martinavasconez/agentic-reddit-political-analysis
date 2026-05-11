@@ -13,12 +13,18 @@ venv/
 env/
 
 # Data
-data/*.db
-data/*.db-shm
-data/*.db-wal
+*.db
+*.db-shm
+*.db-wal
 data/*.csv
 data/*.json
 data/evaluation/*.csv
+!data/evaluation/ground_truth_manual.csv
+data/evaluation/*.json
+!data/evaluation/evaluation_metrics.json
+
+# Documents (PDF, loose docs)
+*.pdf
 
 # Reports (generated output)
 reports/

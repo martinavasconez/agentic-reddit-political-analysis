@@ -17,8 +17,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-DB_PATH = Path(__file__).parent / "data" / "reddit_political.db"
-REPORTS_DIR = Path(__file__).parent / "reports"
+DB_PATH = Path(__file__).parent.parent / "data" / "reddit_political.db"
+REPORTS_DIR = Path(__file__).parent.parent / "reports"
 
 
 # ── Utilidades ──
