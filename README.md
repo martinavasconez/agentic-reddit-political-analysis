@@ -209,4 +209,4 @@ agentic-reddit-political-analysis/
 
 ## Documentacion
 
-La documentacion tecnica detallada de cada modulo se encuentra en el documento final de tesis.
+- [`DOCUMENTACION_CODIGO.md`](DOCUMENTACION_CODIGO.md) — Documentacion tecnica de todos los modulos
