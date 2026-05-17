@@ -15,8 +15,16 @@ from pathlib import Path
 
 DB_PATH = "data/reddit_political.db"
 DEFAULT_OUTPUT = "data/evaluation/manual_validation_sample.csv"
-DEFAULT_SIZE = 300
 DEFAULT_SEED = 42
+
+# Tamaño muestral por fórmula de Cochran para proporciones:
+#   n = z² × p × (1-p) / e²
+#   z = 1.96 (95% confianza), p = 0.5 (máxima varianza), e = 0.057 (margen de error 5.7%)
+COCHRAN_Z = 1.96
+COCHRAN_P = 0.5
+COCHRAN_E = 0.057
+COCHRAN_N = int((COCHRAN_Z ** 2 * COCHRAN_P * (1 - COCHRAN_P)) / (COCHRAN_E ** 2)) + 1
+DEFAULT_SIZE = 300
 
 
 def main():
