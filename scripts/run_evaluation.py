@@ -218,6 +218,48 @@ def eval_groundtruth(db: DatabaseManager):
 
     agree = sum(1 for p, t in zip(y_pred, y_true) if p == t)
     logger.info(f"\n  Agreement rate: {agree:,}/{total:,} = {agree/total*100:.2f}%")
+
+    # Guardar métricas en JSON reproducible
+    from sklearn.metrics import precision_score, recall_score, f1_score
+    n_ambiguous = sqlite3.connect(db.db_path).execute(
+        "SELECT COUNT(*) FROM sentiment_results sr "
+        "JOIN ground_truth_labels gt ON sr.source_id = gt.source_id AND sr.source_type = gt.source_type "
+        "WHERE sr.final_label = 'ambiguous'"
+    ).fetchone()[0]
+
+    per_class = {}
+    for i, label in enumerate(labels):
+        mask_true = [1 if t == label else 0 for t in y_true]
+        mask_pred = [1 if p == label else 0 for p in y_pred]
+        support = sum(mask_true)
+        per_class[label] = {
+            "precision": round(precision_score(mask_true, mask_pred, zero_division=0), 4),
+            "recall": round(recall_score(mask_true, mask_pred, zero_division=0), 4),
+            "f1": round(f1_score(mask_true, mask_pred, zero_division=0), 4),
+            "support": support,
+        }
+
+    metrics = {
+        "n_total": total + n_ambiguous,
+        "n_evaluated": total,
+        "n_ambiguous": n_ambiguous,
+        "accuracy": round(acc, 4),
+        "precision_macro": round(precision_score(y_true, y_pred, labels=labels, average="macro", zero_division=0), 4),
+        "recall_macro": round(recall_score(y_true, y_pred, labels=labels, average="macro", zero_division=0), 4),
+        "f1_macro": round(f1_score(y_true, y_pred, labels=labels, average="macro", zero_division=0), 4),
+        "confusion_matrix": {
+            "labels": labels,
+            "matrix": cm.tolist(),
+        },
+        "per_class": per_class,
+    }
+
+    out_path = Path("data/evaluation/evaluation_metrics.json")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=2, ensure_ascii=False)
+    logger.info(f"\n  Métricas guardadas en: {out_path}")
+
     logger.info("=" * 60)
 
 
